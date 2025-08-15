@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 
+	storage "yggdrasil-api-go/src/storage/interface"
 	"yggdrasil-api-go/src/yggdrasil"
 
 	"gorm.io/gorm"
@@ -30,10 +31,43 @@ func (s *Storage) GetProfileByUUID(uuid string) (*yggdrasil.Profile, error) {
 		return nil, err
 	}
 
+	// 获取角色的材质信息
+	textures, err := s.GetPlayerTextures(result.UUID)
+	if err != nil {
+		// 如果获取材质失败，仍然返回角色信息，但properties为空
+		return &yggdrasil.Profile{
+			ID:         result.UUID,
+			Name:       result.PlayerName,
+			Properties: []yggdrasil.ProfileProperty{},
+		}, nil
+	}
+
+	// 提取皮肤和披风URL
+	var skinURL, capeURL string
+	var isSlim bool
+
+	if skinInfo, exists := textures[storage.TextureTypeSkin]; exists {
+		skinURL = skinInfo.URL
+		if skinInfo.Metadata != nil {
+			isSlim = skinInfo.Metadata.Slim
+		}
+	}
+
+	if capeInfo, exists := textures[storage.TextureTypeCape]; exists {
+		capeURL = capeInfo.URL
+	}
+
+	// 生成properties
+	properties, err := yggdrasil.GenerateProfileProperties(result.UUID, result.PlayerName, skinURL, capeURL, isSlim)
+	if err != nil {
+		// 如果生成properties失败，返回空properties
+		properties = []yggdrasil.ProfileProperty{}
+	}
+
 	return &yggdrasil.Profile{
 		ID:         result.UUID,
 		Name:       result.PlayerName,
-		Properties: []yggdrasil.ProfileProperty{}, // 初始化为空数组而不是nil
+		Properties: properties,
 	}, nil
 }
 
@@ -66,10 +100,43 @@ func (s *Storage) GetProfileByName(name string) (*yggdrasil.Profile, error) {
 		}
 	}
 
+	// 获取角色的材质信息
+	textures, err := s.GetPlayerTextures(uuid)
+	if err != nil {
+		// 如果获取材质失败，仍然返回角色信息，但properties为空
+		return &yggdrasil.Profile{
+			ID:         uuid,
+			Name:       result.PlayerName,
+			Properties: []yggdrasil.ProfileProperty{},
+		}, nil
+	}
+
+	// 提取皮肤和披风URL
+	var skinURL, capeURL string
+	var isSlim bool
+
+	if skinInfo, exists := textures[storage.TextureTypeSkin]; exists {
+		skinURL = skinInfo.URL
+		if skinInfo.Metadata != nil {
+			isSlim = skinInfo.Metadata.Slim
+		}
+	}
+
+	if capeInfo, exists := textures[storage.TextureTypeCape]; exists {
+		capeURL = capeInfo.URL
+	}
+
+	// 生成properties
+	properties, err := yggdrasil.GenerateProfileProperties(uuid, result.PlayerName, skinURL, capeURL, isSlim)
+	if err != nil {
+		// 如果生成properties失败，返回空properties
+		properties = []yggdrasil.ProfileProperty{}
+	}
+
 	return &yggdrasil.Profile{
 		ID:         uuid,
 		Name:       result.PlayerName,
-		Properties: []yggdrasil.ProfileProperty{}, // 初始化为空数组而不是nil
+		Properties: properties,
 	}, nil
 }
 

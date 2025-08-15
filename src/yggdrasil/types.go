@@ -1,7 +1,12 @@
 // Package yggdrasil 定义了Yggdrasil API的公共类型
 package yggdrasil
 
-import "time"
+import (
+	"encoding/base64"
+	"time"
+
+	"github.com/bytedance/sonic"
+)
 
 // User 用户模型
 type User struct {
@@ -139,6 +144,86 @@ type MetaInfo struct {
 	ImplementationVersion string            `json:"implementationVersion"`   // 实现版本
 	Links                 map[string]string `json:"links"`                   // 相关链接
 	FeatureNonEmailLogin  bool              `json:"feature.non_email_login"` // 支持非邮箱登录
+}
+
+// TextureData 材质数据结构（用于生成 textures 属性）
+type TextureData struct {
+	Timestamp   int64                  `json:"timestamp"`   // 时间戳（毫秒）
+	ProfileID   string                 `json:"profileId"`   // 角色UUID（无符号）
+	ProfileName string                 `json:"profileName"` // 角色名称
+	IsPublic    bool                   `json:"isPublic"`    // 是否公开
+	Textures    map[string]TextureInfo `json:"textures"`    // 材质信息
+}
+
+// TextureInfo 单个材质信息
+type TextureInfo struct {
+	URL      string                 `json:"url"`                // 材质URL
+	Metadata map[string]interface{} `json:"metadata,omitempty"` // 材质元数据
+}
+
+// GenerateTexturesProperty 生成 textures 属性的 base64 编码值
+func GenerateTexturesProperty(profileID, profileName string, skinURL, capeURL string, isSlim bool) (string, error) {
+	textureData := TextureData{
+		Timestamp:   time.Now().UnixMilli(),
+		ProfileID:   profileID,
+		ProfileName: profileName,
+		IsPublic:    true,
+		Textures:    make(map[string]TextureInfo),
+	}
+
+	// 添加皮肤材质
+	if skinURL != "" {
+		skinInfo := TextureInfo{
+			URL: skinURL,
+		}
+		// 如果是纤细模型，添加 metadata
+		if isSlim {
+			skinInfo.Metadata = map[string]interface{}{
+				"model": "slim",
+			}
+		}
+		textureData.Textures["SKIN"] = skinInfo
+	}
+
+	// 添加披风材质
+	if capeURL != "" {
+		textureData.Textures["CAPE"] = TextureInfo{
+			URL: capeURL,
+		}
+	}
+
+	// 序列化为 JSON
+	jsonData, err := sonic.Marshal(textureData)
+	if err != nil {
+		return "", err
+	}
+
+	// Base64 编码
+	return base64.StdEncoding.EncodeToString(jsonData), nil
+}
+
+// GenerateProfileProperties 生成角色的完整属性列表
+func GenerateProfileProperties(profileID, profileName string, skinURL, capeURL string, isSlim bool) ([]ProfileProperty, error) {
+	var properties []ProfileProperty
+
+	// 生成 textures 属性
+	texturesValue, err := GenerateTexturesProperty(profileID, profileName, skinURL, capeURL, isSlim)
+	if err != nil {
+		return nil, err
+	}
+
+	properties = append(properties, ProfileProperty{
+		Name:  "textures",
+		Value: texturesValue,
+	})
+
+	// 添加 uploadableTextures 属性
+	properties = append(properties, ProfileProperty{
+		Name:  "uploadableTextures",
+		Value: "skin,cape",
+	})
+
+	return properties, nil
 }
 
 // ErrorResponse 错误响应

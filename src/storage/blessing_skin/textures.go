@@ -138,6 +138,7 @@ func (s *Storage) GetPlayerTextures(playerUUID string) (map[storage.TextureType]
 		TIDCape  int    `gorm:"column:tid_cape"`
 		SkinHash string `gorm:"column:skin_hash"`
 		SkinSize int    `gorm:"column:skin_size"`
+		SkinType string `gorm:"column:skin_type"`
 		SkinTime string `gorm:"column:skin_time"`
 		CapeHash string `gorm:"column:cape_hash"`
 		CapeSize int    `gorm:"column:cape_size"`
@@ -146,7 +147,7 @@ func (s *Storage) GetPlayerTextures(playerUUID string) (map[storage.TextureType]
 
 	err = s.db.Table("players p").
 		Select(`p.pid, p.name, p.tid_skin, p.tid_cape,
-			s.hash as skin_hash, s.size as skin_size, s.upload_at as skin_time,
+			s.hash as skin_hash, s.size as skin_size, s.type as skin_type, s.upload_at as skin_time,
 			c.hash as cape_hash, c.size as cape_size, c.upload_at as cape_time`).
 		Joins("LEFT JOIN textures s ON p.tid_skin = s.tid AND p.tid_skin > 0").
 		Joins("LEFT JOIN textures c ON p.tid_cape = c.tid AND p.tid_cape > 0").
@@ -161,12 +162,16 @@ func (s *Storage) GetPlayerTextures(playerUUID string) (map[storage.TextureType]
 
 	// 处理皮肤材质
 	if result.TIDSkin > 0 && result.SkinHash != "" {
+		// 判断是否为纤细模型
+		isSlim := result.SkinType == "alex"
+
 		textures[storage.TextureTypeSkin] = &storage.TextureInfo{
 			Type: storage.TextureTypeSkin,
 			URL:  s.getTextureURL(result.SkinHash),
 			Metadata: &storage.TextureMetadata{
 				Hash:     result.SkinHash,
 				FileSize: int64(result.SkinSize),
+				Slim:     isSlim,
 				// UploadedAt: 需要解析时间字符串，这里简化处理
 			},
 		}

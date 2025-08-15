@@ -1,15 +1,13 @@
 # Yggdrasil API Server (Go) - 开发文档
 
 ## 🎉 最新状态 (2025-08-15)
-**✅ 服务器完全可用！所有功能测试通过（12/12，100%）**
-- 公钥显示问题已修复
-- 缓存系统完全可配置
-- 性能优化全部实施
-- 压力测试表现优秀（QPS 322+，错误率0%）
-- **🔧 Profile Properties JSON格式问题已修复** - 修复了Minecraft客户端兼容性问题
-- **🚀 生产级代码优化完成** - 移除冗余字段，优化内存使用，清理未使用代码
-- **🛠️ 双重清理问题已修复** - 统一使用全局清理例程，避免重复清理
-- **🐛 authlib-injector兼容性问题已修复** - 修复了查询不存在玩家时返回null而非空数组的问题
+**✅ 严重功能缺失已修复！Profile Properties 完全实现**
+- ✅ `/sessionserver/session/minecraft/profile/{uuid}` 现在正确返回 properties 字段
+- ✅ 实现了完整的 textures 属性（包含皮肤和披风信息）
+- ✅ 实现了 uploadableTextures 属性（值为 "skin,cape"）
+- ✅ 支持纤细模型（alex）的 metadata 信息
+- ✅ 兼容 BlessingSkin 和文件存储两种后端
+- ✅ 完全符合 Yggdrasil 技术规范要求
 
 ## 项目概述
 
@@ -17,7 +15,7 @@
 
 ## 技术栈
 
-- **语言**: Go 1.24.5+
+- **语言**: Go 1.21+
 - **框架**: Gin HTTP框架
 - **认证**: JWT令牌
 - **存储**: 多后端支持（内存、文件、BlessingSkin兼容）
