@@ -61,7 +61,6 @@
 - 📁 **文件存储** - 轻量级部署
 - 🗄️ **数据库存储** - 高可用性
 - 🎨 **BlessingSkin** - 完全兼容
-- 🔄 **热切换** - 无需重启
 
 </td>
 <td width="50%">
@@ -178,7 +177,7 @@ docker run -d \
 
 | 配置类型   | 说明              | 支持选项                           |
 | ---------- | ----------------- | ---------------------------------- |
-| 🗄️ **存储** | 用户数据存储      | `file` `memory` `blessing_skin`    |
+| 🗄️ **存储** | 用户数据存储      | `file` `blessing_skin` `database`    |
 | 🗃️ **缓存** | Token/Session缓存 | `memory` `redis` `file` `database` |
 | 🔐 **认证** | JWT和RSA配置      | 自定义密钥、过期时间               |
 | 🌐 **网络** | 服务器和CORS      | 端口、域名白名单                   |
@@ -879,8 +878,6 @@ cache:
 <div align="center">
 
 ### 💝 感谢所有贡献者
-
-[![Contributors](https://contrib.rocks/image?repo=NewNanCity/YggdrasilGo)](https://github.com/NewNanCity/YggdrasilGo/graphs/contributors)
 
 </div>
 
