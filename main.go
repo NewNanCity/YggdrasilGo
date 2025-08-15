@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"path"
+	"strings"
 	"time"
 
 	"yggdrasil-api-go/src/cache"
@@ -101,17 +102,25 @@ func main() {
 	router.Use(middleware.CORS())
 	router.Use(middleware.PerformanceMonitor()) // 性能监控中间件
 
+	// 根据配置决定是否使用基础路径
+	var baseGroup *gin.RouterGroup
+	if cfg.Server.BaseURL != "" {
+		baseGroup = router.Group(cfg.Server.BaseURL)
+	} else {
+		baseGroup = router.Group("")
+	}
+
 	// API元数据端点
-	router.GET("/", metaHandler.GetAPIMetadata)
+	baseGroup.GET("/", metaHandler.GetAPIMetadata)
 
 	// 性能监控端点
-	router.GET("/metrics", func(c *gin.Context) {
+	baseGroup.GET("/metrics", func(c *gin.Context) {
 		stats := utils.GlobalMetrics.GetStats()
 		utils.RespondJSONFast(c, stats)
 	})
 
 	// 认证服务器端点
-	authGroup := router.Group("/authserver")
+	authGroup := baseGroup.Group("/authserver")
 	authGroup.Use(middleware.CheckContentType())
 	{
 		// 需要速率限制的端点（如果启用）
@@ -134,7 +143,7 @@ func main() {
 	}
 
 	// 会话服务器端点
-	sessionGroup := router.Group("/sessionserver/session/minecraft")
+	sessionGroup := baseGroup.Group("/sessionserver/session/minecraft")
 	{
 		sessionGroup.POST("/join", middleware.CheckContentType(), sessionHandler.Join)
 		sessionGroup.GET("/hasJoined", sessionHandler.HasJoined)
@@ -142,7 +151,7 @@ func main() {
 	}
 
 	// API端点
-	apiGroup := router.Group("/api")
+	apiGroup := baseGroup.Group("/api")
 	{
 		apiGroup.POST("/profiles/minecraft", middleware.CheckContentType(), profileHandler.SearchMultipleProfiles)
 		apiGroup.GET("/users/profiles/minecraft/:username", profileHandler.SearchSingleProfile)
@@ -157,9 +166,19 @@ func main() {
 
 	// 启动服务器
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
+	apiRoot := fmt.Sprintf("http://localhost:%d%s", cfg.Server.Port, cfg.Server.BaseURL)
+	if cfg.Server.BaseURL == "" {
+		apiRoot = fmt.Sprintf("http://localhost:%d/", cfg.Server.Port)
+	} else if !strings.HasSuffix(apiRoot, "/") {
+		apiRoot += "/"
+	}
+
 	log.Printf("🚀 Yggdrasil API Server starting on %s", addr)
 	log.Printf("📖 API Documentation: http://localhost:%d", cfg.Server.Port)
-	log.Printf("🔗 API Root: http://localhost:%d/", cfg.Server.Port)
+	log.Printf("🔗 API Root: %s", apiRoot)
+	if cfg.Server.BaseURL != "" {
+		log.Printf("📍 Base URL: %s", cfg.Server.BaseURL)
+	}
 
 	if err := router.Run(addr); err != nil {
 		log.Fatalf("Failed to start server: %v", err)

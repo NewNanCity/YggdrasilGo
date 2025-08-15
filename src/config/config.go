@@ -179,9 +179,10 @@ type WarmupConfig struct {
 
 // ServerConfig 服务器配置
 type ServerConfig struct {
-	Host  string `yaml:"host"`  // 监听地址
-	Port  int    `yaml:"port"`  // 监听端口
-	Debug bool   `yaml:"debug"` // 调试模式
+	Host    string `yaml:"host"`     // 监听地址
+	Port    int    `yaml:"port"`     // 监听端口
+	Debug   bool   `yaml:"debug"`    // 调试模式
+	BaseURL string `yaml:"base_url"` // API基础路径，如 "/api/yggdrasil"
 }
 
 // AuthConfig 认证配置
@@ -277,6 +278,17 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid server port: %d", c.Server.Port)
 	}
 
+	// 验证BaseURL格式
+	if c.Server.BaseURL != "" {
+		if !strings.HasPrefix(c.Server.BaseURL, "/") {
+			return fmt.Errorf("base_url must start with '/', got: %s", c.Server.BaseURL)
+		}
+		// 去除末尾的斜杠（除非是根路径）
+		if c.Server.BaseURL != "/" && strings.HasSuffix(c.Server.BaseURL, "/") {
+			c.Server.BaseURL = strings.TrimSuffix(c.Server.BaseURL, "/")
+		}
+	}
+
 	// 验证JWT密钥
 	if len(c.Auth.JWTSecret) < 32 {
 		return fmt.Errorf("JWT secret must be at least 32 characters long")
@@ -369,9 +381,10 @@ func (c *Config) GetLinkURL(linkType, host string) string {
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Host:  "0.0.0.0",
-			Port:  8080,
-			Debug: false,
+			Host:    "0.0.0.0",
+			Port:    8080,
+			Debug:   false,
+			BaseURL: "", // 默认为空，表示不使用基础路径
 		},
 		Auth: AuthConfig{
 			TokenExpiration:     3 * 24 * time.Hour, // 3天
