@@ -3,17 +3,16 @@
 # 🎯 Yggdrasil API Server (Go)
 
 <p align="center">
-  <img src="https://img.shields.io/github/go-mod/go-version/NewNanCity/YggdrasilGo?style=for-the-badge&logo=go" alt="Go Version">
-  <img src="https://img.shields.io/github/license/NewNanCity/YggdrasilGo?style=for-the-badge" alt="License">
-  <img src="https://img.shields.io/github/v/release/NewNanCity/YggdrasilGo?style=for-the-badge&logo=github" alt="Release">
-  <img src="https://img.shields.io/github/workflow/status/NewNanCity/YggdrasilGo/Build%20Test?style=for-the-badge&logo=github-actions" alt="Build Status">
+  <img src="https://img.shields.io/github/go-mod/go-version/NewNanCity/YggdrasilGo?logo=go" alt="Go Version">
+  <img src="https://img.shields.io/github/license/NewNanCity/YggdrasilGo" alt="License">
+  <img src="https://img.shields.io/github/v/release/NewNanCity/YggdrasilGo?logo=github" alt="Release">
+  <img src="https://img.shields.io/github/actions/workflow/status/NewNanCity/YggdrasilGo/release.yml?logo=github-actions" alt="Build Status">
 </p>
 
 <p align="center">
-  <img src="https://img.shields.io/docker/pulls/NewNanCity/YggdrasilGo?style=for-the-badge&logo=docker" alt="Docker Pulls">
-  <img src="https://img.shields.io/github/stars/NewNanCity/YggdrasilGo?style=for-the-badge&logo=github" alt="GitHub Stars">
-  <img src="https://img.shields.io/github/forks/NewNanCity/YggdrasilGo?style=for-the-badge&logo=github" alt="GitHub Forks">
-  <img src="https://img.shields.io/github/issues/NewNanCity/YggdrasilGo?style=for-the-badge&logo=github" alt="GitHub Issues">
+  <img src="https://img.shields.io/github/stars/NewNanCity/YggdrasilGo?logo=github" alt="GitHub Stars">
+  <img src="https://img.shields.io/github/forks/NewNanCity/YggdrasilGo?logo=github" alt="GitHub Forks">
+  <img src="https://img.shields.io/github/issues/NewNanCity/YggdrasilGo?logo=github" alt="GitHub Issues">
 </p>
 
 <h3>🚀 高性能的 Minecraft Yggdrasil API 服务器实现</h3>
