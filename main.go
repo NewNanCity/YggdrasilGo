@@ -37,9 +37,10 @@ func main() {
 		if err != nil {
 			log.Fatalf("Failed to load or generate key pair: %v", err)
 		}
+		log.Printf("✅ Loaded RSA key pair from %s and %s", cfg.Yggdrasil.Keys.PrivateKeyPath, cfg.Yggdrasil.Keys.PublicKeyPath)
+	} else {
+		log.Printf("✅ RSA key pair will be loaded from BlessingSkin database options table")
 	}
-
-	log.Printf("✅ Loaded RSA key pair from %s and %s", cfg.Yggdrasil.Keys.PrivateKeyPath, cfg.Yggdrasil.Keys.PublicKeyPath)
 
 	// 设置JWT密钥
 	utils.SetJWTSecret(cfg.Auth.JWTSecret)

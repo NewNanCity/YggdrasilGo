@@ -78,7 +78,8 @@ func (h *ProfileHandler) SearchMultipleProfiles(c *gin.Context) {
 	}
 
 	// 构建简化的响应（不包含属性）
-	var result []map[string]string
+	// 初始化为空数组，确保即使没有结果也返回[]而不是null
+	result := make([]map[string]string, 0, len(profiles))
 	for _, profile := range profiles {
 		result = append(result, map[string]string{
 			"id":   profile.ID,
