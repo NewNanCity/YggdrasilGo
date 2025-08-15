@@ -1,0 +1,143 @@
+# Yggdrasil API 配置文件示例
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8080
+  debug: false
+
+# 认证配置
+auth:
+  token_expiration: 72h # Token过期时间
+  jwt_secret: "yggdrasil-api-secret-key-change-in-production-32chars-minimum"
+  tokens_limit: 10
+  require_verification: false
+
+# 速率限制配置
+rate:
+  auth_interval: 1s
+  enabled: true
+
+# 存储配置
+storage:
+  type: "file" # 可选: file, database, blessing_skin
+
+  file_options:
+    data_dir: "data"
+
+  database_options:
+    database_dsn: ""
+    debug: false
+
+  blessingskin_options:
+    database_dsn: "user:password@tcp(localhost:3306)/blessing_skin?charset=utf8mb4&parseTime=True&loc=Local"
+    debug: false
+    texture_base_url_override: false
+    security:
+      salt: "blessing_skin_salt"
+      pwd_method: "BCRYPT"
+      app_key: "base64:your_app_key_here"
+
+# 缓存配置
+cache:
+  token:
+    type: "memory" # 可选: memory, redis, file, database
+    options:
+      cache_dir: "storage/framework/cache" # 文件缓存目录
+      redis_url: "redis://localhost:6379/0" # Redis连接URL
+  session:
+    type: "memory"
+    options:
+      cache_dir: "storage/framework/cache"
+      redis_url: "redis://localhost:6379/0"
+  response:
+    enabled: true
+    api_metadata: true
+    error_responses: true
+    profile_responses: true
+    cache_duration: 10m
+    max_cache_size: 1000
+  user:
+    enabled: true
+    duration: 5m
+    max_users: 500
+    cleanup_interval: 1m
+
+# 材质配置
+texture:
+  base_url: ""
+  upload_enabled: false
+  max_file_size: 1048576 # 1MB
+  allowed_types: [ "image/png", "image/jpeg" ]
+
+# Yggdrasil配置
+yggdrasil:
+  meta:
+    server_name: "Yggdrasil API Server (Go)"
+    implementation_name: "yggdrasil-api-go"
+    implementation_version: "1.0.0"
+    links:
+      homepage: "http://localhost:8080"
+      register: "http://localhost:8080/register"
+  skin_domains:
+  - ".minecraft.net"
+  - ".mojang.com"
+  keys:
+    private_key_path: "conf/keys/private.pem"
+    public_key_path: "conf/keys/public.pem"
+  features:
+    non_email_login: true
+
+# 中间件配置
+middleware:
+  cors:
+    enabled: true
+    allowed_origins: [ "*" ]
+    allowed_methods: [ "GET", "POST", "PUT", "DELETE", "OPTIONS" ]
+    allowed_headers: [ "Origin", "Content-Type", "Content-Length", "Accept-Encoding", "X-CSRF-Token", "Authorization" ]
+    exposed_headers: [ "Content-Length" ]
+    allow_credentials: true
+    max_age: 86400 # 24小时
+  rate_limit:
+    enabled: true
+    auth_interval: 1s
+    global_limit: 60 # 每分钟60个请求
+    burst_limit: 10 # 突发10个请求
+  performance:
+    enabled: true
+    detailed_metrics: false
+
+# 日志配置
+logging:
+  level: "info" # debug, info, warn, error
+  format: "text" # text, json
+  output: "stdout" # stdout, stderr, file
+  file: "logs/yggdrasil.log"
+  max_size: 100 # MB
+  max_backups: 3
+  max_age: 7 # 天
+  compress: true
+
+# 监控配置
+monitoring:
+  enabled: true
+  metrics_endpoint: "/metrics"
+  cache_stats: true
+  db_stats: true
+  system_stats: true
+
+# 安全配置
+security:
+  max_request_size: "1MB"
+  read_timeout: 30s
+  write_timeout: 30s
+  idle_timeout: 60s
+
+# 预热配置
+warmup:
+  enabled: true
+  api_metadata: true
+  error_cache: true
+  uuid_cache: true
+  profile_cache: false
+  concurrent_num: 5

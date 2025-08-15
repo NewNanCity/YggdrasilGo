@@ -1,0 +1,241 @@
+name: 🚀 Release Build
+
+on:
+  push:
+    tags:
+      - "v*"
+      - "v*.*"
+      - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release"
+        required: true
+        default: "v1.0.0"
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+
+jobs:
+  # 构建多平台二进制文件
+  build:
+    name: 🔨 Build Release
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Windows
+          - goos: windows
+            goarch: amd64
+            suffix: .exe
+          - goos: windows
+            goarch: arm64
+            suffix: .exe
+
+          # Linux
+          - goos: linux
+            goarch: amd64
+            suffix: ""
+          - goos: linux
+            goarch: arm64
+            suffix: ""
+
+          # macOS
+          - goos: darwin
+            goarch: amd64
+            suffix: ""
+          - goos: darwin
+            goarch: arm64
+            suffix: ""
+
+          # FreeBSD
+          - goos: freebsd
+            goarch: amd64
+            suffix: ""
+
+    steps:
+      - name: 📦 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.5"
+
+      - name: 🔨 Build Binary
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          if [ -z "$VERSION" ]; then
+            VERSION="${{ github.event.inputs.tag || 'v1.0.0' }}"
+          fi
+          BINARY_NAME="yggdrasil-api-server-${VERSION}-${{ matrix.goos }}-${{ matrix.goarch }}${{ matrix.suffix }}"
+
+          echo "构建 ${BINARY_NAME}..."
+          go build \
+            -ldflags="-w -s -X main.version=${VERSION}" \
+            -o "${BINARY_NAME}" \
+            main.go
+
+          # 生成校验和
+          sha256sum "${BINARY_NAME}" > "${BINARY_NAME}.sha256"
+
+          # 验证文件是否存在
+          ls -la "${BINARY_NAME}"*
+          echo "构建完成: ${BINARY_NAME}"
+
+      - name: 📤 Upload Build Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: |
+            yggdrasil-api-server-*
+            *.sha256
+          retention-days: 7
+
+  # Docker镜像
+  docker:
+    name: 🐳 Docker
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: 📦 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: 🔐 Login to Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🏷️ Extract metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: 🐳 Build and push
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # 创建Release
+  release:
+    name: 🎉 Release
+    needs: [build, docker]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: 📦 Checkout
+        uses: actions/checkout@v4
+
+      - name: 📥 Download All Build Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: ./release
+          merge-multiple: true
+
+      - name: 📝 Generate Release Checksums
+        working-directory: ./release
+        run: |
+          echo "列出所有文件："
+          ls -la
+          echo "生成完整的校验和文件..."
+          sha256sum yggdrasil-api-server-* > SHA256SUMS
+          echo "校验和文件内容："
+          cat SHA256SUMS
+
+      - name: 🎉 Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: Yggdrasil API Server ${{ github.ref_name }}
+          files: |
+            release/yggdrasil-api-server-*
+            release/SHA256SUMS
+          generate_release_notes: true
+          draft: false
+          prerelease: false
+          body: |
+            ## 🚀 Yggdrasil API Server ${{ github.ref_name }}
+
+            高性能的 Minecraft Yggdrasil API 服务器实现，使用 Go 语言编写。
+
+            ### ✨ 主要特性
+            - 🚀 高性能 Gin 框架，支持高并发
+            - 🔐 完整的 JWT Token 管理和 RSA 签名
+            - 💾 多种存储后端（文件、数据库、BlessingSkin）
+            - 🗄️ 多种缓存支持（内存、Redis、文件、数据库）
+            - 🎯 100% 兼容 Minecraft 官方 Yggdrasil API
+            - 📊 内置性能监控和健康检查
+
+            ### 📦 下载说明
+            请根据您的操作系统和架构选择对应的二进制文件：
+
+            - **Windows**: `yggdrasil-api-server-*-windows-*.exe`
+            - **Linux**: `yggdrasil-api-server-*-linux-*`
+            - **macOS**: `yggdrasil-api-server-*-darwin-*`
+            - **FreeBSD**: `yggdrasil-api-server-*-freebsd-*`
+
+            ### 🔒 校验文件完整性
+            使用 `SHA256SUMS` 文件验证下载的二进制文件：
+            ```bash
+            sha256sum -c SHA256SUMS
+            ```
+
+            ### 🐳 Docker镜像
+            ```bash
+            docker pull ghcr.io/${{ github.repository }}:${{ github.ref_name }}
+            ```
+
+            ### 📝 快速开始
+            1. 下载对应平台的二进制文件
+            2. 复制配置文件：`cp conf/example.yml conf/config.yml`
+            3. 生成密钥对：
+               ```bash
+               mkdir -p keys
+               openssl genrsa -out keys/private.pem 2048
+               openssl rsa -in keys/private.pem -pubout -out keys/public.pem
+               ```
+            4. 启动服务器：
+               ```bash
+               # Linux/macOS
+               chmod +x yggdrasil-api-server-*
+               ./yggdrasil-api-server-* -config conf/config.yml
+
+               # Windows
+               yggdrasil-api-server-*.exe -config conf/config.yml
+               ```
+
+            ### 📚 文档
+            - [配置说明](https://github.com/${{ github.repository }}/blob/main/README.md#配置说明)
+            - [API文档](https://github.com/${{ github.repository }}/blob/main/docs/)
+            - [部署指南](https://github.com/${{ github.repository }}/blob/main/README.md#部署)
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

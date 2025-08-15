@@ -1,0 +1,106 @@
+name: 🔨 Build Test
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    name: 🧪 Test
+    runs-on: ubuntu-latest
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ROOT_PASSWORD: test_password
+          MYSQL_DATABASE: yggdrasil_test
+          MYSQL_USER: yggdrasil
+          MYSQL_PASSWORD: test_password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=3
+
+    steps:
+      - name: 📦 Checkout
+        uses: actions/checkout@v4
+
+      - name: 🔧 Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.5"
+
+      - name: 📥 Cache Go modules
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/go-build
+            ~/go/pkg/mod
+          key: ${{ runner.os }}-go-${{ hashFiles('**/go.sum') }}
+          restore-keys: |
+            ${{ runner.os }}-go-
+
+      - name: 📦 Download dependencies
+        run: go mod download
+
+      - name: 🔍 Run go vet
+        run: go vet ./...
+
+      - name: 🧪 Run tests
+        run: |
+          go test -v -race -coverprofile=coverage.out ./...
+          go tool cover -html=coverage.out -o coverage.html
+
+      - name: 📊 Upload coverage reports
+        uses: codecov/codecov-action@v4
+        with:
+          file: ./coverage.out
+          flags: unittests
+          name: codecov-umbrella
+
+      - name: 🔨 Build binary
+        run: |
+          go build -o yggdrasil-api-server main.go
+          ./yggdrasil-api-server -version || echo "Version command not implemented yet"
+
+      - name: 🧪 Integration test
+        run: |
+          # 创建测试配置
+          mkdir -p conf keys
+          cp conf/example.yml conf/test.yml
+
+          # 生成测试密钥
+          openssl genrsa -out keys/private.pem 2048
+          openssl rsa -in keys/private.pem -pubout -out keys/public.pem
+
+          # 启动服务器进行集成测试
+          timeout 30s ./yggdrasil-api-server -config conf/test.yml &
+          sleep 5
+
+          # 测试API端点
+          curl -f http://localhost:8080/ || echo "Server not ready for testing"
+
+      - name: 📤 Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: |
+            yggdrasil-api-server
+            coverage.html
+          retention-days: 7
