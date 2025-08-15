@@ -667,11 +667,86 @@ MIT License
 - **性能监控**: 内存使用5.64MB，错误率0.00%，平均响应21.82ms
 - **测试账号**: nmg_wk@yeah.net / Sttot / fiztex-9fywke-fiJjiv
 
+## 🔧 重要修复记录
+
+### Profile Properties 功能缺失修复 (2025-08-15)
+
+**问题描述**：
+`/sessionserver/session/minecraft/profile/{uuid}` 接口的响应中 `properties` 字段为空，但根据 Yggdrasil 规范应该包含 `textures` 和 `uploadableTextures` 属性。
+
+**修复内容**：
+
+1. **新增材质信息结构体** (`src/yggdrasil/types.go`)：
+   - `TextureData`: 用于生成 textures 属性的数据结构
+   - `TextureInfo`: 单个材质信息结构
+   - `GenerateTexturesProperty()`: 生成 base64 编码的 textures 属性
+   - `GenerateProfileProperties()`: 生成完整的 properties 列表
+
+2. **修改存储层实现**：
+   - **BlessingSkin 存储** (`src/storage/blessing_skin/profiles.go`):
+     - 修改 `GetProfileByUUID()` 和 `GetProfileByName()` 方法
+     - 调用 `GetPlayerTextures()` 获取材质信息
+     - 生成正确的 properties 字段
+   - **文件存储** (`src/storage/file/players.go`):
+     - 同样修改两个核心方法
+     - 支持材质信息的获取和处理
+
+3. **材质信息处理**：
+   - 支持皮肤和披风 URL 的获取
+   - 正确处理纤细模型（alex）的 metadata
+   - 生成符合规范的 JSON 结构并进行 base64 编码
+
+**测试结果**：
+```json
+{
+  "id": "e8f118932c70316a881dd3bdcf73b058",
+  "name": "Sttot",
+  "properties": [
+    {
+      "name": "textures",
+      "value": "eyJ0aW1lc3RhbXAiOjE3NTUyNTU2MTI5NjYsInByb2ZpbGVJZCI6ImU4ZjExODkzMmM3MDMxNmE4ODFkZDNiZGNmNzNiMDU4IiwicHJvZmlsZU5hbWUiOiJTdHRvdCIsImlzUHVibGljIjp0cnVlLCJ0ZXh0dXJlcyI6eyJTS0lOIjp7InVybCI6Imh0dHBzOi8vc2tpbi5uZXduYW4uY2l0eS90ZXh0dXJlcy9jZDJkOWViZjg4OThkMjUzMjgwNmVjOWE0MzBlYTgxN2Q1MzQwZTQxMDk1YWVjNmVhNjQwOTk3ZGZiNzQzNjQzIiwibWV0YWRhdGEiOnsibW9kZWwiOiJzbGltIn19LCJDQVBFIjp7InVybCI6Imh0dHBzOi8vc2tpbi5uZXduYW4uY2l0eS90ZXh0dXJlcy82ZGIyNjZiNGQwZDg2MzUzOGQyNWEyY2Q1MDFmN2VkMGQyMTI5ZGQyNDEyZmNlMDU3ZmMwMzZlMjZkODIyN2ZiIn19fQ=="
+    },
+    {
+      "name": "uploadableTextures",
+      "value": "skin,cape"
+    }
+  ]
+}
+```
+
+解码后的 textures 内容：
+```json
+{
+  "timestamp": 1755255612966,
+  "profileId": "e8f118932c70316a881dd3bdcf73b058",
+  "profileName": "Sttot",
+  "isPublic": true,
+  "textures": {
+    "SKIN": {
+      "url": "https://skin.newnan.city/textures/cd2d9ebf8898d2532806ec9a430ea817d5340e41095aec6ea640997dfb743643",
+      "metadata": {
+        "model": "slim"
+      }
+    },
+    "CAPE": {
+      "url": "https://skin.newnan.city/textures/6db266b4d0d863538d25a2cd501f7ed0d2129dd2412fce057fc036e26d8227fb"
+    }
+  }
+}
+```
+
+**影响范围**：
+- ✅ 修复了 Minecraft 客户端无法加载皮肤和披风的问题
+- ✅ 完全符合 authlib-injector 技术规范
+- ✅ 兼容现有的 BlessingSkin 数据库结构
+- ✅ 不影响其他 API 接口的功能
+
 ### 📋 下一步计划
 
 1. ✅ **压力测试验证**: 已完成，性能表现优秀
-2. **APM工具集成**: Prometheus + Grafana生产监控
-3. **Redis缓存支持**: 分布式缓存支持多实例部署
-4. **数据库索引优化**: 分析慢查询并添加复合索引
-5. **Docker部署**: 提供完整的容器化部署方案
+2. ✅ **Profile Properties 修复**: 已完成，完全符合规范
+3. **APM工具集成**: Prometheus + Grafana生产监控
+4. **Redis缓存支持**: 分布式缓存支持多实例部署
+5. **数据库索引优化**: 分析慢查询并添加复合索引
+6. **Docker部署**: 提供完整的容器化部署方案
 6. **负载均衡**: 多实例部署和负载均衡配置
