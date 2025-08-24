@@ -2,8 +2,9 @@
 package handlers
 
 import (
+	"crypto/rsa"
 	"fmt"
-	"os"
+	"sync"
 	"yggdrasil-api-go/src/config"
 	storage "yggdrasil-api-go/src/storage/interface"
 	"yggdrasil-api-go/src/utils"
@@ -55,10 +56,10 @@ func (h *MetaHandler) GetAPIMetadata(c *gin.Context) {
 		links["register"] = h.config.GetLinkURL("register", host)
 	}
 
-	// 加载公钥
-	publicKey, err := h.loadPublicKey()
+	// 加载密钥对（只需要公钥用于API元数据）
+	_, publicKey, err := h.loadSignatureKeyPair()
 	if err != nil {
-		utils.RespondError(c, 500, "InternalServerError", "Failed to load public key")
+		utils.RespondError(c, 500, "InternalServerError", "Failed to load signature key pair")
 		return
 	}
 
@@ -85,17 +86,78 @@ func (h *MetaHandler) GetAPIMetadata(c *gin.Context) {
 	}
 }
 
-// loadPublicKey 加载公钥
-func (h *MetaHandler) loadPublicKey() (string, error) {
-	// 对于blessingskin存储，从options表读取私钥并提取公钥
-	if h.storage.GetStorageType() == "blessing_skin" {
-		return h.storage.GetPublicKey()
+// 缓存的密钥对
+var (
+	cachedPrivateKey    string
+	cachedPublicKey     string
+	cachedRSAPrivateKey *rsa.PrivateKey
+	cachedRSAPublicKey  *rsa.PublicKey
+	keyPairCached       bool
+	keyPairMutex        sync.RWMutex
+)
+
+// loadSignatureKeyPair 加载签名密钥对并缓存
+func (h *MetaHandler) loadSignatureKeyPair() (privateKey string, publicKey string, err error) {
+	// 先检查缓存
+	keyPairMutex.RLock()
+	if keyPairCached {
+		defer keyPairMutex.RUnlock()
+		return cachedPrivateKey, cachedPublicKey, nil
+	}
+	keyPairMutex.RUnlock()
+
+	// 获取写锁进行加载
+	keyPairMutex.Lock()
+	defer keyPairMutex.Unlock()
+
+	// 双重检查，防止并发加载
+	if keyPairCached {
+		return cachedPrivateKey, cachedPublicKey, nil
 	}
 
-	// 对于其他存储类型，从配置文件读取公钥
-	data, err := os.ReadFile(h.config.Yggdrasil.Keys.PublicKeyPath)
-	if err != nil {
-		return "", fmt.Errorf("failed to read public key file: %w", err)
+	// 对于blessingskin存储，从options表读取密钥对
+	if h.storage.GetStorageType() == "blessing_skin" {
+		privateKey, publicKey, err = h.storage.GetSignatureKeyPair()
+		if err != nil {
+			return "", "", fmt.Errorf("failed to get signature key pair from storage: %w", err)
+		}
+	} else {
+		// 对于其他存储类型，从配置文件读取密钥对
+		privateKey, publicKey, err = utils.LoadOrGenerateKeyPair(
+			h.config.Yggdrasil.Keys.PrivateKeyPath,
+			h.config.Yggdrasil.Keys.PublicKeyPath,
+		)
+		if err != nil {
+			return "", "", fmt.Errorf("failed to load key pair from files: %w", err)
+		}
 	}
-	return string(data), nil
+
+	// 解析并缓存RSA密钥对
+	rsaPrivateKey, err := utils.ParsePrivateKey(privateKey)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to parse private key: %w", err)
+	}
+
+	rsaPublicKey := &rsaPrivateKey.PublicKey
+
+	// 缓存所有密钥信息
+	cachedPrivateKey = privateKey
+	cachedPublicKey = publicKey
+	cachedRSAPrivateKey = rsaPrivateKey
+	cachedRSAPublicKey = rsaPublicKey
+	keyPairCached = true
+
+	return privateKey, publicKey, nil
+}
+
+// GetCachedRSAKeyPair 获取缓存的RSA密钥对（高性能版本）
+func GetCachedRSAKeyPair() (privateKey *rsa.PrivateKey, publicKey *rsa.PublicKey, err error) {
+	keyPairMutex.RLock()
+	defer keyPairMutex.RUnlock()
+
+	if !keyPairCached {
+		return nil, nil, fmt.Errorf("RSA key pair not cached, call loadSignatureKeyPair first")
+	}
+
+	return cachedRSAPrivateKey, cachedRSAPublicKey, nil
 }

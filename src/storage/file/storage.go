@@ -398,7 +398,7 @@ func parseTime(timeStr string) time.Time {
 	return time.Now()
 }
 
-// GetPublicKey 获取公钥（文件存储不支持密钥管理）
-func (s *Storage) GetPublicKey() (string, error) {
-	return "", fmt.Errorf("public key not available in file storage, use config file")
+// GetSignatureKeyPair 获取签名用的密钥对（文件存储不支持密钥管理）
+func (s *Storage) GetSignatureKeyPair() (privateKey string, publicKey string, err error) {
+	return "", "", fmt.Errorf("signature key pair not available in file storage, use config file")
 }

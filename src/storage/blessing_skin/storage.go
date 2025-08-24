@@ -225,7 +225,7 @@ func (s *Storage) GetTextureSigner() *TextureSigner {
 	return s.textureSigner
 }
 
-// GetPublicKey 获取公钥（从options表读取私钥并提取公钥）
-func (s *Storage) GetPublicKey() (string, error) {
-	return s.textureSigner.GetPublicKey()
+// GetSignatureKeyPair 获取签名用的密钥对（私钥和公钥）
+func (s *Storage) GetSignatureKeyPair() (privateKey string, publicKey string, err error) {
+	return s.textureSigner.GetSignatureKeyPair()
 }

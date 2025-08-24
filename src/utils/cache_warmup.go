@@ -99,9 +99,9 @@ func warmupAPIMetadata(cfg *config.Config, store storage.Storage) error {
 		var publicKey string
 		var err error
 
-		// 对于blessingskin存储，从options表读取私钥并提取公钥
+		// 对于blessingskin存储，从options表读取密钥对
 		if store.GetStorageType() == "blessing_skin" {
-			publicKey, err = store.GetPublicKey()
+			_, publicKey, err = store.GetSignatureKeyPair()
 		} else {
 			// 对于其他存储类型，从配置文件读取公钥
 			publicKey, err = loadPublicKey(cfg.Yggdrasil.Keys.PublicKeyPath)

@@ -105,8 +105,9 @@ type Storage interface {
 	// GetStorageType 获取存储类型
 	GetStorageType() string
 
-	// GetPublicKey 获取公钥（用于API元数据）
-	GetPublicKey() (string, error)
+	// GetSignatureKeyPair 获取签名用的密钥对（私钥和公钥）
+	// 只有部分存储类型支持此方法，其他存储类型返回错误
+	GetSignatureKeyPair() (privateKey string, publicKey string, err error)
 }
 
 // StorageFactory 存储工厂接口

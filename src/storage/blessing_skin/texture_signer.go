@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"yggdrasil-api-go/src/yggdrasil"
@@ -20,7 +21,11 @@ import (
 
 // TextureSigner 材质签名器
 type TextureSigner struct {
-	storage *Storage
+	storage          *Storage
+	cachedPrivateKey *rsa.PrivateKey
+	cachedPublicKey  *rsa.PublicKey
+	keyPairCached    bool
+	keyPairMutex     sync.RWMutex
 }
 
 // NewTextureSigner 创建材质签名器
@@ -117,15 +122,10 @@ func (ts *TextureSigner) SignProfile(profile *yggdrasil.Profile, unsigned bool) 
 
 	// 如果需要签名
 	if !unsigned {
-		privateKeyPEM, err := ts.storage.optionsMgr.GetOption("ygg_private_key")
-		if err != nil || privateKeyPEM == "" {
-			return fmt.Errorf("RSA private key not configured")
-		}
-
-		// 解析私钥
-		privateKey, err := ts.parsePrivateKey(privateKeyPEM)
+		// 获取缓存的RSA密钥对
+		privateKey, _, err := ts.getCachedRSAKeyPair()
 		if err != nil {
-			return fmt.Errorf("invalid RSA private key: %w", err)
+			return fmt.Errorf("failed to get RSA key pair: %w", err)
 		}
 
 		// 签名材质属性
@@ -208,6 +208,70 @@ func (ts *TextureSigner) GetPublicKey() (string, error) {
 	})
 
 	return string(publicKeyPEM), nil
+}
+
+// GetSignatureKeyPair 获取签名用的密钥对（私钥和公钥）
+func (ts *TextureSigner) GetSignatureKeyPair() (privateKey string, publicKey string, err error) {
+	privateKeyPEM, err := ts.storage.optionsMgr.GetOption("ygg_private_key")
+	if err != nil || privateKeyPEM == "" {
+		return "", "", fmt.Errorf("RSA private key not configured")
+	}
+
+	// 验证私钥格式
+	_, err = ts.parsePrivateKey(privateKeyPEM)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid RSA private key: %w", err)
+	}
+
+	// 获取公钥
+	publicKeyPEM, err := ts.GetPublicKey()
+	if err != nil {
+		return "", "", fmt.Errorf("failed to get public key: %w", err)
+	}
+
+	return privateKeyPEM, publicKeyPEM, nil
+}
+
+// getCachedRSAKeyPair 获取缓存的RSA密钥对
+func (ts *TextureSigner) getCachedRSAKeyPair() (*rsa.PrivateKey, *rsa.PublicKey, error) {
+	// 先检查缓存
+	ts.keyPairMutex.RLock()
+	if ts.keyPairCached {
+		defer ts.keyPairMutex.RUnlock()
+		return ts.cachedPrivateKey, ts.cachedPublicKey, nil
+	}
+	ts.keyPairMutex.RUnlock()
+
+	// 获取写锁进行加载
+	ts.keyPairMutex.Lock()
+	defer ts.keyPairMutex.Unlock()
+
+	// 双重检查，防止并发加载
+	if ts.keyPairCached {
+		return ts.cachedPrivateKey, ts.cachedPublicKey, nil
+	}
+
+	// 从options表读取私钥
+	privateKeyPEM, err := ts.storage.optionsMgr.GetOption("ygg_private_key")
+	if err != nil || privateKeyPEM == "" {
+		return nil, nil, fmt.Errorf("RSA private key not configured")
+	}
+
+	// 解析私钥
+	privateKey, err := ts.parsePrivateKey(privateKeyPEM)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid RSA private key: %w", err)
+	}
+
+	// 提取公钥
+	publicKey := &privateKey.PublicKey
+
+	// 缓存密钥对
+	ts.cachedPrivateKey = privateKey
+	ts.cachedPublicKey = publicKey
+	ts.keyPairCached = true
+
+	return privateKey, publicKey, nil
 }
 
 // VerifySignature 验证签名（用于测试）

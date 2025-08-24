@@ -87,7 +87,7 @@ func main() {
 	metaHandler := handlers.NewMetaHandler(store, cfg)
 	authHandler := handlers.NewAuthHandler(store, tokenCache, sessionCache)
 	sessionHandler := handlers.NewSessionHandler(store, tokenCache, sessionCache)
-	profileHandler := handlers.NewProfileHandler(store)
+	profileHandler := handlers.NewProfileHandler(store, cfg)
 	textureHandler := handlers.NewTextureHandler(store)
 
 	// 设置Gin模式
