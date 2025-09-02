@@ -31,8 +31,12 @@ LABEL maintainer="NewNanCity Team"
 # 复制二进制文件
 COPY --from=builder /app/yggdrasil-api-server .
 
+# 复制时区数据
+COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
 # 暴露端口
 EXPOSE 8080
+ENV TZ=Asia/Shanghai
 
 # 挂载点
 VOLUME ["/app/conf", "/app/storage", "/app/data", "/app/logs"]
