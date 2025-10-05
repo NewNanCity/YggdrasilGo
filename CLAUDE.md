@@ -783,13 +783,64 @@ MIT License
 - **智能降级**: 缓存未命中时自动降级到传统方式，确保系统健壮性
 - **全面覆盖**: Handler层和BlessingSkin TextureSigner都实现了缓存优化
 
+## 🔐 HasJoined API 签名修复 ✅ (2025-08-24)
+
+### **问题发现**
+根据 Yggdrasil 规范，`/sessionserver/session/minecraft/hasJoined` 接口应该:
+1. 验证 username 是否与 serverId 对应令牌绑定的角色名称相同
+2. 返回令牌所绑定角色的完整信息(包含角色属性及数字签名)
+
+但原实现存在两个问题:
+- ❌ 没有验证 username 对应的角色UUID是否与session中的ProfileID匹配
+- ❌ 返回的角色信息没有包含数字签名
+
+### **修复内容**
+
+#### 1. **添加角色UUID验证** ✅
+在 `src/handlers/session.go` 的 `HasJoined` 方法中添加:
+```go
+// 验证角色UUID是否与会话中的ProfileID匹配
+if profile.ID != session.ProfileID {
+    utils.RespondNoContent(c)
+    return
+}
+```
+
+#### 2. **添加签名生成功能** ✅
+- 为 `SessionHandler` 添加 `config` 字段
+- 实现 `generateSignature` 方法(高性能版本，使用RSA密钥缓存)
+- 实现 `loadSignatureKeyPair` 方法(支持BlessingSkin和文件存储)
+- 在 `HasJoined` 方法中为所有属性生成数字签名
+
+#### 3. **更新构造函数** ✅
+- 修改 `NewSessionHandler` 构造函数，添加 `cfg *config.Config` 参数
+- 更新 `main.go` 中的调用
+
+### **技术实现**
+- **签名算法**: SHA1withRSA，与 Profile API 完全一致
+- **密钥缓存**: 使用全局RSA密钥对缓存，避免重复解析
+- **多存储支持**: 支持BlessingSkin(从数据库读取)和文件存储(从配置读取)
+- **性能优化**: 使用 `SignDataWithRSAKey` 高性能签名函数
+
+### **规范合规性**
+- ✅ 检查 serverId 是否存在且有效
+- ✅ 验证 username 与 serverId 对应的角色匹配
+- ✅ 可选验证 IP 地址
+- ✅ 返回完整的角色信息(包含属性和数字签名)
+- ✅ 失败时返回 HTTP 204
+
+### **修改文件**
+- `src/handlers/session.go`: 添加签名生成逻辑和角色验证
+- `main.go`: 更新 SessionHandler 构造函数调用
+
 ### 📋 下一步计划
 
 1. ✅ **压力测试验证**: 已完成，性能表现优秀
 2. ✅ **Profile Properties 修复**: 已完成，完全符合规范
 3. ✅ **数字签名系统**: 已完成，支持SHA1withRSA签名
-4. **APM工具集成**: Prometheus + Grafana生产监控
-5. **Redis缓存支持**: 分布式缓存支持多实例部署
-6. **数据库索引优化**: 分析慢查询并添加复合索引
-7. **Docker部署**: 提供完整的容器化部署方案
-8. **负载均衡**: 多实例部署和负载均衡配置
+4. ✅ **HasJoined API 修复**: 已完成，添加签名和验证
+5. **APM工具集成**: Prometheus + Grafana生产监控
+6. **Redis缓存支持**: 分布式缓存支持多实例部署
+7. **数据库索引优化**: 分析慢查询并添加复合索引
+8. **Docker部署**: 提供完整的容器化部署方案
+9. **负载均衡**: 多实例部署和负载均衡配置

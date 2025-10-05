@@ -86,7 +86,7 @@ func main() {
 	// 创建处理器（直接传入存储和缓存）
 	metaHandler := handlers.NewMetaHandler(store, cfg)
 	authHandler := handlers.NewAuthHandler(store, tokenCache, sessionCache)
-	sessionHandler := handlers.NewSessionHandler(store, tokenCache, sessionCache)
+	sessionHandler := handlers.NewSessionHandler(store, tokenCache, sessionCache, cfg)
 	profileHandler := handlers.NewProfileHandler(store, cfg)
 	textureHandler := handlers.NewTextureHandler(store)
 
