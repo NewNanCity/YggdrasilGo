@@ -22,8 +22,9 @@ type CacheToken struct {
 	UserID  string `gorm:"primaryKey;column:user_id;size:50" json:"user_id"`  // 用户ID（JWT.sub）
 	TokenID string `gorm:"primaryKey;column:token_id;size:50" json:"token_id"` // TokenID（JWT.yggt）
 
-	// Token信息（只存储JWT中没有的信息）
+	// Token信息
 	ClientToken string `gorm:"column:client_token;size:255" json:"client_token"` // ClientToken（验证用）
+    ProfileID   string `gorm:"column:profile_id;size:50" json:"profile_id"`   // ProfileID（从JWT中提取）
 
 	// 时间信息
 	CreatedAt time.Time `gorm:"column:created_at;not null" json:"created_at"`
@@ -130,6 +131,7 @@ func (c *TokenCache) Store(token *yggdrasil.Token) error {
 	cacheToken.UserID = claims.UserID   // 从JWT中获取用户ID
 	cacheToken.TokenID = claims.TokenID // 从JWT中获取TokenID
 	cacheToken.ClientToken = token.ClientToken
+	cacheToken.ProfileID = token.ProfileID
 	cacheToken.CreatedAt = token.CreatedAt
 	cacheToken.ExpiresAt = token.ExpiresAt
 	cacheToken.UpdatedAt = time.Now()
@@ -220,7 +222,7 @@ func (c *TokenCache) GetUserTokens(userID string) ([]*yggdrasil.Token, error) {
 		token := &yggdrasil.Token{
 			AccessToken: "", // 不需要完整的AccessToken
 			ClientToken: ct.ClientToken,
-			ProfileID:   "", // ProfileID已从JWT中移除，不再存储
+			ProfileID:   ct.ProfileID,
 			Owner:       ct.UserID,
 			CreatedAt:   ct.CreatedAt,
 			ExpiresAt:   ct.ExpiresAt,
