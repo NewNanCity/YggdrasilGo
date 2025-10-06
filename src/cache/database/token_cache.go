@@ -19,16 +19,16 @@ import (
 // CacheToken 数据库缓存Token表结构（优化设计）
 type CacheToken struct {
 	// 复合主键：用户ID + TokenID（从JWT中提取）
-	UserID  string `gorm:"primaryKey;size:50" json:"user_id"`  // 用户ID（JWT.sub）
-	TokenID string `gorm:"primaryKey;size:50" json:"token_id"` // TokenID（JWT.yggt）
+	UserID  string `gorm:"primaryKey;column:user_id;size:50" json:"user_id"`  // 用户ID（JWT.sub）
+	TokenID string `gorm:"primaryKey;column:token_id;size:50" json:"token_id"` // TokenID（JWT.yggt）
 
 	// Token信息（只存储JWT中没有的信息）
-	ClientToken string `gorm:"size:255" json:"client_token"` // ClientToken（验证用）
+	ClientToken string `gorm:"column:client_token;size:255" json:"client_token"` // ClientToken（验证用）
 
 	// 时间信息
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `gorm:"index" json:"expires_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	CreatedAt time.Time `gorm:"column:created_at;not null" json:"created_at"`
+	ExpiresAt time.Time `gorm:"index;column:expires_at;not null" json:"expires_at"`
+	UpdatedAt time.Time `gorm:"column:updated_at;not null" json:"updated_at"`
 
 	// 用于动态表名
 	tablePrefix string `gorm:"-"`

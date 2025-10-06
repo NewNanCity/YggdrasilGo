@@ -39,7 +39,7 @@ func (c *TokenCache) Store(token *yggdrasil.Token) error {
 	cacheToken := &yggdrasil.Token{
 		AccessToken: token.AccessToken, // 保留完整的AccessToken用于兼容性
 		ClientToken: token.ClientToken,
-		ProfileID:   "",            // 不再存储ProfileID，从JWT中获取
+		ProfileID:   claims.ProfileID, // 从JWT中获取ProfileID
 		Owner:       claims.UserID, // 从JWT中获取用户ID
 		CreatedAt:   token.CreatedAt,
 		ExpiresAt:   token.ExpiresAt,

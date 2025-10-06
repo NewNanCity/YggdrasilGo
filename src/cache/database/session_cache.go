@@ -7,7 +7,6 @@ import (
 	"sync"
 	"time"
 
-	"yggdrasil-api-go/src/utils"
 	"yggdrasil-api-go/src/yggdrasil"
 
 	"gorm.io/driver/mysql"
@@ -19,14 +18,16 @@ import (
 // CacheSession 数据库缓存Session表结构（优化设计）
 type CacheSession struct {
 	// 主键：服务器ID
-	ServerID string `gorm:"primaryKey;size:255" json:"server_id"` // 服务器ID
+	ServerID string `gorm:"primaryKey;column:server_id;size:255" json:"server_id"` // 服务器ID
 
 	// Session信息（只存储必要信息）
-	ClientIP string `gorm:"size:45" json:"client_ip"` // 客户端IP
+	ClientIP    string `gorm:"size:45;column:client_ip;not null" json:"client_ip"`                          // 客户端IP
+	AccessToken string `gorm:"size:512;column:access_token;not null;default:''" json:"access_token"` // AccessToken（验证用）
+	ProfileID   string `gorm:"size:50;column:profile_id;not null;default:''" json:"profile_id"`                         // 角色ID（冗余字段，暂不使用）
 
 	// 时间信息
-	CreatedAt time.Time `json:"created_at"`
-	ExpiresAt time.Time `gorm:"index" json:"expires_at"`
+	CreatedAt time.Time `gorm:"column:created_at;not null" json:"created_at"`
+	ExpiresAt time.Time `gorm:"index;column:expires_at;not null" json:"expires_at"`
 
 	// 用于动态表名
 	tablePrefix string `gorm:"-"`
@@ -112,16 +113,10 @@ func (c *SessionCache) newCacheSession() *CacheSession {
 	return &CacheSession{tablePrefix: c.tablePrefix}
 }
 
-// Store 存储Session（优化版：验证JWT但只存储必要信息）
+// Store 存储Session
 func (c *SessionCache) Store(serverID string, session *yggdrasil.Session) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-
-	// 验证JWT（用于快速失败）
-	_, err := utils.ValidateJWT(session.AccessToken)
-	if err != nil {
-		return fmt.Errorf("invalid JWT token in session: %w", err)
-	}
 
 	// Session默认30秒过期（与Yggdrasil标准一致）
 	expiresAt := time.Now().Add(30 * time.Second)
@@ -129,6 +124,8 @@ func (c *SessionCache) Store(serverID string, session *yggdrasil.Session) error 
 	// 存储到数据库（只存储必要信息，不存储AccessToken和ProfileID）
 	cacheSession := c.newCacheSession()
 	cacheSession.ServerID = serverID
+	cacheSession.AccessToken = session.AccessToken
+	cacheSession.ProfileID = session.ProfileID
 	cacheSession.ClientIP = session.ClientIP
 	cacheSession.CreatedAt = session.CreatedAt
 	cacheSession.ExpiresAt = expiresAt
@@ -159,8 +156,8 @@ func (c *SessionCache) Get(serverID string) (*yggdrasil.Session, error) {
 	// 直接从数据库字段构建Session对象（不需要反序列化）
 	session := &yggdrasil.Session{
 		ServerID:    cacheSession.ServerID,
-		AccessToken: "", // 不需要AccessToken，HasJoined验证时不使用
-		ProfileID:   "", // ProfileID将在HasJoined验证时通过用户名查询获取
+		AccessToken: cacheSession.AccessToken,
+		ProfileID:   cacheSession.ProfileID,
 		ClientIP:    cacheSession.ClientIP,
 		CreatedAt:   cacheSession.CreatedAt,
 	}

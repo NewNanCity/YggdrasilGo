@@ -6,7 +6,6 @@ import (
 	"sync"
 	"time"
 
-	"yggdrasil-api-go/src/utils"
 	"yggdrasil-api-go/src/yggdrasil"
 )
 
@@ -33,20 +32,14 @@ func (c *SessionCache) Store(serverID string, session *yggdrasil.Session) error 
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	// 验证JWT（用于快速失败）
-	_, err := utils.ValidateJWT(session.AccessToken)
-	if err != nil {
-		return fmt.Errorf("invalid JWT token in session: %w", err)
-	}
-
 	// Session固定过期时间为30秒（与Yggdrasil标准一致）
 	ttl := 30 * time.Second
 
 	// 创建简化的Session对象（不存储AccessToken和ProfileID）
 	cacheSession := &yggdrasil.Session{
 		ServerID:    serverID,
-		AccessToken: "", // 不存储AccessToken
-		ProfileID:   "", // 不存储ProfileID，HasJoined时通过用户名查询
+		AccessToken: session.AccessToken, // 仍然存储AccessToken以供验证
+		ProfileID:   session.ProfileID,  // 仍然存储ProfileID以供验证
 		ClientIP:    session.ClientIP,
 		CreatedAt:   session.CreatedAt,
 	}

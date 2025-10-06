@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"time"
 
-	"yggdrasil-api-go/src/utils"
 	"yggdrasil-api-go/src/yggdrasil"
 
 	"github.com/bytedance/sonic"
@@ -47,17 +46,11 @@ func NewSessionCache(options map[string]any) (*SessionCache, error) {
 
 // Store 存储Session（优化版：验证JWT但只存储必要信息）
 func (c *SessionCache) Store(serverID string, session *yggdrasil.Session) error {
-	// 验证JWT（用于快速失败）
-	_, err := utils.ValidateJWT(session.AccessToken)
-	if err != nil {
-		return fmt.Errorf("invalid JWT token in session: %w", err)
-	}
-
 	// 创建简化的Session对象（不存储AccessToken和ProfileID）
 	cacheSession := &yggdrasil.Session{
 		ServerID:    serverID,
-		AccessToken: "", // 不存储AccessToken
-		ProfileID:   "", // 不存储ProfileID，HasJoined时通过用户名查询
+		AccessToken: session.AccessToken,
+		ProfileID:   session.ProfileID,
 		ClientIP:    session.ClientIP,
 		CreatedAt:   session.CreatedAt,
 	}
