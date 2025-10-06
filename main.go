@@ -95,6 +95,8 @@ func main() {
 
 	// 创建路由器
 	router := gin.New()
+	router.RemoveExtraSlash = true
+	router.RedirectTrailingSlash = true
 
 	// 添加中间件
 	router.Use(gin.Logger())
