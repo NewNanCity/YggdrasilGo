@@ -9,7 +9,7 @@ RUN apk add --no-cache git ca-certificates tzdata
 
 # 下载依赖
 COPY go.mod go.sum ./
-RUN go mod download
+RUN RUN go env -w GO111MODULE=on && go env -w GOPROXY=https://goproxy.cn,direct && go mod download
 
 # 编译应用
 COPY . .
@@ -28,11 +28,14 @@ LABEL org.opencontainers.image.description="A high-performance Yggdrasil API ser
 LABEL org.opencontainers.image.licenses=MIT
 LABEL maintainer="NewNanCity Team"
 
-# 复制二进制文件
-COPY --from=builder /app/yggdrasil-api-server .
+# 复制CA证书用于HTTPS/TLS验证
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 
 # 复制时区数据
 COPY --from=builder /usr/share/zoneinfo /usr/share/zoneinfo
+
+# 复制二进制文件
+COPY --from=builder /app/yggdrasil-api-server .
 
 # 暴露端口
 EXPOSE 8080
