@@ -9,7 +9,7 @@ RUN apk add --no-cache git ca-certificates tzdata
 
 # 下载依赖
 COPY go.mod go.sum ./
-RUN RUN go env -w GO111MODULE=on && go env -w GOPROXY=https://goproxy.cn,direct && go mod download
+RUN go env -w GO111MODULE=on && go env -w GOPROXY=https://goproxy.cn,direct && go mod download
 
 # 编译应用
 COPY . .
