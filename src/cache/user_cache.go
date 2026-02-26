@@ -74,7 +74,7 @@ func (uc *UserCache) cleanup() {
 	defer ticker.Stop()
 
 	for range ticker.C {
-		uc.cache.Range(func(key, value interface{}) bool {
+		uc.cache.Range(func(key, value any) bool {
 			item := value.(*UserCacheItem)
 			if item.IsExpired() {
 				uc.cache.Delete(key)
@@ -85,11 +85,11 @@ func (uc *UserCache) cleanup() {
 }
 
 // GetStats 获取缓存统计
-func (uc *UserCache) GetStats() map[string]interface{} {
+func (uc *UserCache) GetStats() map[string]any {
 	count := 0
 	expired := 0
 
-	uc.cache.Range(func(key, value interface{}) bool {
+	uc.cache.Range(func(key, value any) bool {
 		count++
 		item := value.(*UserCacheItem)
 		if item.IsExpired() {
@@ -98,7 +98,7 @@ func (uc *UserCache) GetStats() map[string]interface{} {
 		return true
 	})
 
-	return map[string]interface{}{
+	return map[string]any{
 		"total_items":            count,
 		"expired_items":          expired,
 		"valid_items":            count - expired,

@@ -3,6 +3,7 @@ package file
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 
@@ -72,13 +73,7 @@ func (c *TokenCache) Store(token *yggdrasil.Token) error {
 	}
 
 	// 检查Token是否已存在
-	found := false
-	for _, accessToken := range existingTokens {
-		if accessToken == token.AccessToken {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(existingTokens, token.AccessToken)
 
 	// 如果不存在，添加到列表
 	if !found {

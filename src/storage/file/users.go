@@ -240,15 +240,9 @@ func (s *Storage) ListUsers(offset, limit int) ([]*yggdrasil.User, int, error) {
 	total := len(users)
 
 	// 应用分页
-	start := offset
-	if start > total {
-		start = total
-	}
+	start := min(offset, total)
 
-	end := start + limit
-	if end > total {
-		end = total
-	}
+	end := min(start+limit, total)
 
 	return users[start:end], total, nil
 }

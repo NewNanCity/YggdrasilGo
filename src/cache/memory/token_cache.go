@@ -3,6 +3,7 @@ package memory
 
 import (
 	"fmt"
+	"slices"
 	"sync"
 
 	"yggdrasil-api-go/src/utils"
@@ -40,7 +41,7 @@ func (c *TokenCache) Store(token *yggdrasil.Token) error {
 		AccessToken: token.AccessToken, // 保留完整的AccessToken用于兼容性
 		ClientToken: token.ClientToken,
 		ProfileID:   claims.ProfileID, // 从JWT中获取ProfileID
-		Owner:       claims.UserID, // 从JWT中获取用户ID
+		Owner:       claims.UserID,    // 从JWT中获取用户ID
 		CreatedAt:   token.CreatedAt,
 		ExpiresAt:   token.ExpiresAt,
 	}
@@ -53,13 +54,7 @@ func (c *TokenCache) Store(token *yggdrasil.Token) error {
 	userTokens := c.userTokens[claims.UserID]
 
 	// 检查是否已存在
-	found := false
-	for _, tokenID := range userTokens {
-		if tokenID == claims.TokenID {
-			found = true
-			break
-		}
-	}
+	found := slices.Contains(userTokens, claims.TokenID)
 
 	if !found {
 		c.userTokens[claims.UserID] = append(userTokens, claims.TokenID)

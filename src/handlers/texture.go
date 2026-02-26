@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"strings"
 	"time"
 
@@ -259,10 +260,5 @@ func isAllowedContentType(contentType string) bool {
 		"image/jpg",
 	}
 
-	for _, allowed := range allowedTypes {
-		if contentType == allowed {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(allowedTypes, contentType)
 }

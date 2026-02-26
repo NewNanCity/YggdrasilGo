@@ -44,7 +44,7 @@ func addResult(name string, success bool, message string) {
 }
 
 // HTTP请求工具函数
-func makeRequest(method, url string, body interface{}) (*http.Response, []byte, error) {
+func makeRequest(method, url string, body any) (*http.Response, []byte, error) {
 	var reqBody io.Reader
 	if body != nil {
 		jsonData, err := sonic.Marshal(body)
@@ -117,10 +117,10 @@ func main() {
 
 	// 4. 角色名登录测试（获取选中的角色）
 	fmt.Println("\n🎮 4. 角色名登录测试")
-	playerLoginData := map[string]interface{}{
+	playerLoginData := map[string]any{
 		"username": TestPlayer,
 		"password": TestPassword,
-		"agent": map[string]interface{}{
+		"agent": map[string]any{
 			"name":    "Minecraft",
 			"version": 1,
 		},
@@ -132,17 +132,17 @@ func main() {
 		return
 	}
 
-	var playerAuthResp map[string]interface{}
+	var playerAuthResp map[string]any
 	sonic.Unmarshal(body, &playerAuthResp)
 	playerAccessToken := playerAuthResp["accessToken"].(string)
 	playerClientToken := playerAuthResp["clientToken"].(string)
-	selectedProfile := playerAuthResp["selectedProfile"].(map[string]interface{})
+	selectedProfile := playerAuthResp["selectedProfile"].(map[string]any)
 	uuid := selectedProfile["id"].(string)
 	addResult("角色名登录", true, fmt.Sprintf("成功，选中角色UUID: %s", uuid))
 
 	// 5. 令牌验证测试
 	fmt.Println("\n🔍 5. 令牌验证测试")
-	validateData := map[string]interface{}{
+	validateData := map[string]any{
 		"accessToken": playerAccessToken,
 		"clientToken": playerClientToken,
 	}
@@ -155,7 +155,7 @@ func main() {
 
 	// 6. 令牌刷新测试
 	fmt.Println("\n🔄 6. 令牌刷新测试")
-	refreshData := map[string]interface{}{
+	refreshData := map[string]any{
 		"accessToken": playerAccessToken,
 		"clientToken": playerClientToken,
 	}
@@ -163,7 +163,7 @@ func main() {
 	if err != nil || resp.StatusCode != 200 {
 		addResult("令牌刷新", false, fmt.Sprintf("失败: %s", string(body)))
 	} else {
-		var refreshResp map[string]interface{}
+		var refreshResp map[string]any
 		sonic.Unmarshal(body, &refreshResp)
 		playerAccessToken = refreshResp["accessToken"].(string) // 使用新令牌
 		playerClientToken = refreshResp["clientToken"].(string)
@@ -172,7 +172,7 @@ func main() {
 
 	// 7. 会话管理测试
 	fmt.Println("\n🎯 7. 会话管理测试")
-	joinData := map[string]interface{}{
+	joinData := map[string]any{
 		"accessToken":     playerAccessToken,
 		"selectedProfile": uuid,
 		"serverId":        "test-server-123",
@@ -211,10 +211,10 @@ func main() {
 
 	// 10. 邮箱登录测试
 	fmt.Println("\n📧 10. 邮箱登录测试")
-	emailLoginData := map[string]interface{}{
+	emailLoginData := map[string]any{
 		"username": TestEmail,
 		"password": TestPassword,
-		"agent": map[string]interface{}{
+		"agent": map[string]any{
 			"name":    "Minecraft",
 			"version": 1,
 		},
@@ -237,7 +237,7 @@ func main() {
 
 	// 12. 令牌撤销测试
 	fmt.Println("\n🚫 12. 令牌撤销测试")
-	invalidateData := map[string]interface{}{
+	invalidateData := map[string]any{
 		"accessToken": playerAccessToken,
 		"clientToken": playerClientToken,
 	}

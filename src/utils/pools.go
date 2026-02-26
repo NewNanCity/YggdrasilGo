@@ -10,7 +10,7 @@ import (
 var (
 	// 字符串构建器池
 	stringBuilderPool = sync.Pool{
-		New: func() interface{} {
+		New: func() any {
 			return &strings.Builder{}
 		},
 	}
@@ -92,10 +92,7 @@ func AppendStrings(dst []string, src ...string) []string {
 
 	// 预分配容量避免多次扩容
 	if cap(dst)-len(dst) < len(src) {
-		newCap := len(dst) + len(src)
-		if newCap < cap(dst)*2 {
-			newCap = cap(dst) * 2
-		}
+		newCap := max(len(dst)+len(src), cap(dst)*2)
 		newDst := make([]string, len(dst), newCap)
 		copy(newDst, dst)
 		dst = newDst

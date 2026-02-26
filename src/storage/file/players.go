@@ -357,10 +357,7 @@ func (s *Storage) ListProfiles(offset, limit int) ([]*yggdrasil.Profile, int, er
 		return []*yggdrasil.Profile{}, total, nil
 	}
 
-	end := offset + limit
-	if end > total {
-		end = total
-	}
+	end := min(offset+limit, total)
 
 	return profiles[offset:end], total, nil
 }

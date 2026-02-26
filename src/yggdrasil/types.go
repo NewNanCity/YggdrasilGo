@@ -157,8 +157,8 @@ type TextureData struct {
 
 // TextureInfo 单个材质信息
 type TextureInfo struct {
-	URL      string                 `json:"url"`                // 材质URL
-	Metadata map[string]interface{} `json:"metadata,omitempty"` // 材质元数据
+	URL      string         `json:"url"`                // 材质URL
+	Metadata map[string]any `json:"metadata,omitempty"` // 材质元数据
 }
 
 // GenerateTexturesProperty 生成 textures 属性的 base64 编码值
@@ -178,7 +178,7 @@ func GenerateTexturesProperty(profileID, profileName string, skinURL, capeURL st
 		}
 		// 如果是纤细模型，添加 metadata
 		if isSlim {
-			skinInfo.Metadata = map[string]interface{}{
+			skinInfo.Metadata = map[string]any{
 				"model": "slim",
 			}
 		}

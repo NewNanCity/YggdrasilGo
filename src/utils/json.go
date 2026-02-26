@@ -21,27 +21,27 @@ var (
 )
 
 // FastMarshal 高性能JSON序列化
-func FastMarshal(v interface{}) ([]byte, error) {
+func FastMarshal(v any) ([]byte, error) {
 	return sonic.Marshal(v)
 }
 
 // FastUnmarshal 高性能JSON反序列化
-func FastUnmarshal(data []byte, v interface{}) error {
+func FastUnmarshal(data []byte, v any) error {
 	return sonic.Unmarshal(data, v)
 }
 
 // FastMarshalString 高性能JSON序列化为字符串
-func FastMarshalString(v interface{}) (string, error) {
+func FastMarshalString(v any) (string, error) {
 	return sonic.MarshalString(v)
 }
 
 // FastUnmarshalString 高性能JSON字符串反序列化
-func FastUnmarshalString(data string, v interface{}) error {
+func FastUnmarshalString(data string, v any) error {
 	return sonic.UnmarshalString(data, v)
 }
 
 // RespondJSONFast 高性能JSON响应
-func RespondJSONFast(c *gin.Context, data interface{}) {
+func RespondJSONFast(c *gin.Context, data any) {
 	c.Header("Content-Type", "application/json; charset=utf-8")
 
 	// 尝试使用sonic进行快速序列化
@@ -86,7 +86,7 @@ func GetCachedErrorResponse(errorType string) []byte {
 func initErrorResponses() {
 	initOnce.Do(func() {
 		// 预序列化常用错误响应
-		errorResponses := map[string]interface{}{
+		errorResponses := map[string]any{
 			"invalid_token": map[string]string{
 				"error":        "ForbiddenOperationException",
 				"errorMessage": "Invalid token.",

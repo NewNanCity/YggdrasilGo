@@ -89,7 +89,7 @@ func (m *PerformanceMetrics) RecordCacheMiss() {
 }
 
 // GetStats 获取统计信息
-func (m *PerformanceMetrics) GetStats() map[string]interface{} {
+func (m *PerformanceMetrics) GetStats() map[string]any {
 	requestCount := atomic.LoadInt64(&m.RequestCount)
 	errorCount := atomic.LoadInt64(&m.ErrorCount)
 	totalResponseTime := atomic.LoadInt64(&m.TotalResponseTime)
@@ -122,7 +122,7 @@ func (m *PerformanceMetrics) GetStats() map[string]interface{} {
 	var memStats runtime.MemStats
 	runtime.ReadMemStats(&memStats)
 
-	return map[string]interface{}{
+	return map[string]any{
 		"uptime_seconds":       time.Since(m.StartTime).Seconds(),
 		"request_count":        requestCount,
 		"error_count":          errorCount,
@@ -135,7 +135,7 @@ func (m *PerformanceMetrics) GetStats() map[string]interface{} {
 		"cache_hit_rate":       cacheHitRate,
 		"cache_hits":           cacheHits,
 		"cache_misses":         cacheMisses,
-		"memory": map[string]interface{}{
+		"memory": map[string]any{
 			"alloc_mb":       float64(memStats.Alloc) / 1024 / 1024,
 			"total_alloc_mb": float64(memStats.TotalAlloc) / 1024 / 1024,
 			"sys_mb":         float64(memStats.Sys) / 1024 / 1024,
@@ -216,7 +216,7 @@ func (m *PerformanceMetrics) PrintStats() {
 	fmt.Printf("  Cache: Hit Rate=%.2f%% (Hits=%d, Misses=%d)\n",
 		stats["cache_hit_rate"], stats["cache_hits"], stats["cache_misses"])
 
-	if memory, ok := stats["memory"].(map[string]interface{}); ok {
+	if memory, ok := stats["memory"].(map[string]any); ok {
 		fmt.Printf("  Memory: Alloc=%.2fMB, Total=%.2fMB, Sys=%.2fMB, GC=%d\n",
 			memory["alloc_mb"], memory["total_alloc_mb"], memory["sys_mb"], memory["gc_count"])
 	}

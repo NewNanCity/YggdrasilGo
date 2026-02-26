@@ -41,7 +41,7 @@ func (c *LaravelFileCache) GetCacheFilePath(key string) string {
 }
 
 // Store 存储数据到Laravel兼容的缓存文件
-func (c *LaravelFileCache) Store(key string, data interface{}, ttl time.Duration) error {
+func (c *LaravelFileCache) Store(key string, data any, ttl time.Duration) error {
 	// 使用PHP序列化库序列化数据
 	serializedData, err := phpserialize.Marshal(data)
 	if err != nil {
@@ -70,7 +70,7 @@ func (c *LaravelFileCache) Store(key string, data interface{}, ttl time.Duration
 }
 
 // Get 从Laravel兼容的缓存文件获取数据
-func (c *LaravelFileCache) Get(key string, target interface{}) error {
+func (c *LaravelFileCache) Get(key string, target any) error {
 	filePath := c.GetCacheFilePath(key)
 
 	// 读取文件

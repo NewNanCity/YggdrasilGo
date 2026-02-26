@@ -118,8 +118,6 @@ cd yggdrasil-api-go
 go mod download
 
 # 编译
-make build
-# 或者
 go build -o yggdrasil-api-server main.go
 ```
 
@@ -152,8 +150,6 @@ docker run -d \
 
 2. **生成密钥对**：
    ```bash
-   make keys
-   # 或者手动生成
    mkdir -p keys
    openssl genrsa -out keys/private.pem 2048
    openssl rsa -in keys/private.pem -pubout -out keys/public.pem
@@ -176,7 +172,7 @@ docker run -d \
 
 | 配置类型   | 说明              | 支持选项                           |
 | ---------- | ----------------- | ---------------------------------- |
-| 🗄️ **存储** | 用户数据存储      | `file` `blessing_skin` `database`    |
+| 🗄️ **存储** | 用户数据存储      | `file` `blessing_skin` `database`  |
 | 🗃️ **缓存** | Token/Session缓存 | `memory` `redis` `file` `database` |
 | 🔐 **认证** | JWT和RSA配置      | 自定义密钥、过期时间               |
 | 🌐 **网络** | 服务器和CORS      | 端口、域名白名单                   |
@@ -454,8 +450,6 @@ nano .env
 nano conf/config.yml
 
 # 启动服务
-make deploy
-# 或者
 docker-compose up -d
 ```
 
@@ -905,9 +899,9 @@ cd yggdrasil-api-go
 git checkout -b feature/amazing-feature
 
 # 3. 进行开发
-make deps
-make test
-make build
+go mod download
+go test -v ./...
+go build -o yggdrasil-api-server main.go
 
 # 4. 提交更改
 git commit -m "feat: add amazing feature"
