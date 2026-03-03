@@ -296,9 +296,28 @@ func (c *Config) Validate() error {
 		if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
 			return fmt.Errorf("api_location must be an absolute URL, got: %s", c.Server.APILocation)
 		}
-		if !strings.HasSuffix(c.Server.APILocation, "/") {
-			c.Server.APILocation += "/"
+
+		// 仅允许 http/https 协议
+		if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+			return fmt.Errorf("api_location must use http or https scheme, got: %s", parsedURL.Scheme)
 		}
+
+		// 不允许在 api_location 中使用查询参数或片段
+		if parsedURL.RawQuery != "" || parsedURL.Fragment != "" {
+			return fmt.Errorf("api_location must not contain query parameters or fragments, got: %s", c.Server.APILocation)
+		}
+
+		// 确保路径以 "/" 结尾
+		if !strings.HasSuffix(parsedURL.Path, "/") {
+			if parsedURL.Path == "" {
+				parsedURL.Path = "/"
+			} else {
+				parsedURL.Path = parsedURL.Path + "/"
+			}
+		}
+
+		// 使用规范化后的 URL 字符串
+		c.Server.APILocation = parsedURL.String()
 	}
 
 	// 验证JWT密钥
