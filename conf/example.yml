@@ -6,6 +6,7 @@ server:
   port: 8080
   debug: false
   base_url: "" # API基础路径，如 "/api/yggdrasil"
+  api_location: "" # Authlib-Injector ALI地址，例如 "https://api.example.com/"（留空则按请求动态生成）
 
 # 认证配置
 auth:

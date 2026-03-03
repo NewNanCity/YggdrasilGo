@@ -3,6 +3,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -179,10 +180,11 @@ type WarmupConfig struct {
 
 // ServerConfig 服务器配置
 type ServerConfig struct {
-	Host    string `yaml:"host"`     // 监听地址
-	Port    int    `yaml:"port"`     // 监听端口
-	Debug   bool   `yaml:"debug"`    // 调试模式
-	BaseURL string `yaml:"base_url"` // API基础路径，如 "/api/yggdrasil"
+	Host        string `yaml:"host"`         // 监听地址
+	Port        int    `yaml:"port"`         // 监听端口
+	Debug       bool   `yaml:"debug"`        // 调试模式
+	BaseURL     string `yaml:"base_url"`     // API基础路径，如 "/api/yggdrasil"
+	APILocation string `yaml:"api_location"` // 对外发布的API根地址（ALI），为空则按请求动态生成
 }
 
 // AuthConfig 认证配置
@@ -289,6 +291,16 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	if c.Server.APILocation != "" {
+		parsedURL, err := url.Parse(c.Server.APILocation)
+		if err != nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+			return fmt.Errorf("api_location must be an absolute URL, got: %s", c.Server.APILocation)
+		}
+		if !strings.HasSuffix(c.Server.APILocation, "/") {
+			c.Server.APILocation += "/"
+		}
+	}
+
 	// 验证JWT密钥
 	if len(c.Auth.JWTSecret) < 32 {
 		return fmt.Errorf("JWT secret must be at least 32 characters long")
@@ -360,6 +372,28 @@ func (c *Config) GetBaseURL(host string) string {
 	return fmt.Sprintf("http://%s", host)
 }
 
+// GetAPILocation 获取ALI API根地址，优先使用配置项
+func (c *Config) GetAPILocation(scheme, host string) string {
+	if c.Server.APILocation != "" {
+		return c.Server.APILocation
+	}
+
+	if host == "" {
+		host = fmt.Sprintf("localhost:%d", c.Server.Port)
+	}
+
+	if scheme == "" {
+		scheme = "http"
+	}
+
+	basePath := c.Server.BaseURL
+	if basePath == "" || basePath == "/" {
+		return fmt.Sprintf("%s://%s/", scheme, host)
+	}
+
+	return fmt.Sprintf("%s://%s%s/", scheme, host, basePath)
+}
+
 // GetLinkURL 获取链接URL，如果配置中没有则使用动态生成
 func (c *Config) GetLinkURL(linkType, host string) string {
 	if url, exists := c.Yggdrasil.Meta.Links[linkType]; exists && url != "" {
@@ -381,10 +415,11 @@ func (c *Config) GetLinkURL(linkType, host string) string {
 func DefaultConfig() *Config {
 	return &Config{
 		Server: ServerConfig{
-			Host:    "0.0.0.0",
-			Port:    8080,
-			Debug:   false,
-			BaseURL: "", // 默认为空，表示不使用基础路径
+			Host:        "0.0.0.0",
+			Port:        8080,
+			Debug:       false,
+			BaseURL:     "", // 默认为空，表示不使用基础路径
+			APILocation: "", // 默认为空，表示按请求动态生成
 		},
 		Auth: AuthConfig{
 			TokenExpiration:     3 * 24 * time.Hour, // 3天

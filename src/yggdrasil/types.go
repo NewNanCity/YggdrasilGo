@@ -144,6 +144,7 @@ type MetaInfo struct {
 	ImplementationVersion string            `json:"implementationVersion"`   // 实现版本
 	Links                 map[string]string `json:"links"`                   // 相关链接
 	FeatureNonEmailLogin  bool              `json:"feature.non_email_login"` // 支持非邮箱登录
+	APILocation           string            `json:"apiLocation,omitempty"`   // API基础地址（ALI）
 }
 
 // TextureData 材质数据结构（用于生成 textures 属性）

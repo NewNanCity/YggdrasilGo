@@ -42,6 +42,17 @@ func (h *MetaHandler) GetAPIMetadata(c *gin.Context) {
 		host = c.Request.Host
 	}
 
+	// 计算ALI API Location
+	scheme := c.GetHeader("X-Forwarded-Proto")
+	if scheme == "" {
+		if c.Request.TLS != nil {
+			scheme = "https"
+		} else {
+			scheme = "http"
+		}
+	}
+	apiLocation := h.config.GetAPILocation(scheme, c.Request.Host)
+
 	// 动态生成链接
 	links := make(map[string]string)
 	for key := range h.config.Yggdrasil.Meta.Links {
@@ -70,6 +81,7 @@ func (h *MetaHandler) GetAPIMetadata(c *gin.Context) {
 			ImplementationVersion: h.config.Yggdrasil.Meta.ImplementationVersion,
 			Links:                 links,
 			FeatureNonEmailLogin:  h.config.Yggdrasil.Features.NonEmailLogin,
+			APILocation:           apiLocation,
 		},
 		SkinDomains:        h.config.Yggdrasil.SkinDomains,
 		SignaturePublicKey: publicKey,
