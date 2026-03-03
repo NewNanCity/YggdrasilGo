@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"sync"
 	"yggdrasil-api-go/src/config"
+	"yggdrasil-api-go/src/middleware"
 	storage "yggdrasil-api-go/src/storage/interface"
 	"yggdrasil-api-go/src/utils"
 	"yggdrasil-api-go/src/yggdrasil"
@@ -29,17 +30,21 @@ func NewMetaHandler(storage storage.Storage, cfg *config.Config) *MetaHandler {
 
 // GetAPIMetadata 获取API元数据（启用响应缓存）
 func (h *MetaHandler) GetAPIMetadata(c *gin.Context) {
-	// 尝试从缓存获取响应
-	cacheKey := "api_metadata_" + c.Request.Host
-	if cached, exists := utils.GetCachedResponse(cacheKey); exists {
-		c.Data(200, "application/json", cached)
-		return
-	}
-
 	// 获取请求的Host头
 	host := c.GetHeader("Host")
 	if host == "" {
 		host = c.Request.Host
+	}
+
+	// 计算ALI API Location
+	scheme := middleware.ResolveRequestScheme(c.GetHeader("X-Forwarded-Proto"), c.Request.TLS != nil)
+	apiLocation := h.config.GetAPILocation(scheme, host)
+
+	// 尝试从缓存获取响应（包含API Location，避免不同scheme污染）
+	cacheKey := "api_metadata_" + host + "_" + apiLocation
+	if cached, exists := utils.GetCachedResponse(cacheKey); exists {
+		c.Data(200, "application/json", cached)
+		return
 	}
 
 	// 动态生成链接
@@ -70,6 +75,7 @@ func (h *MetaHandler) GetAPIMetadata(c *gin.Context) {
 			ImplementationVersion: h.config.Yggdrasil.Meta.ImplementationVersion,
 			Links:                 links,
 			FeatureNonEmailLogin:  h.config.Yggdrasil.Features.NonEmailLogin,
+			APILocation:           apiLocation,
 		},
 		SkinDomains:        h.config.Yggdrasil.SkinDomains,
 		SignaturePublicKey: publicKey,

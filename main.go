@@ -111,6 +111,7 @@ func main() {
 	} else {
 		baseGroup = router.Group("")
 	}
+	baseGroup.Use(middleware.APILocation(cfg))
 
 	// API元数据端点
 	baseGroup.GET("/", metaHandler.GetAPIMetadata)

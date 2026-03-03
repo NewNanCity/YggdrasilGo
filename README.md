@@ -188,6 +188,8 @@ server:
   host: "0.0.0.0"
   port: 8080
   debug: false
+  base_url: ""
+  api_location: "https://api.example.com/"  # ALI: 明确告知客户端后续应访问的 API Base URL
 
 # 认证配置
 auth:
@@ -284,6 +286,30 @@ security:
 ```
 
 </details>
+
+
+### ALI（API Location Indicator）配置示例
+
+如果你部署在反向代理/网关后，建议显式配置 `server.api_location`，确保客户端始终拿到稳定的 API 根地址：
+
+```yaml
+server:
+  host: "0.0.0.0"
+  port: 8080
+  base_url: ""
+  api_location: "https://api.example.com/"
+```
+
+如果你希望按请求动态推导（基于请求的 scheme + host + base_url），可以留空：
+
+```yaml
+server:
+  base_url: "/api/yggdrasil"
+  api_location: ""
+```
+
+> 留空时，服务会根据请求自动生成类似 `https://your-host/api/yggdrasil/` 的地址。
+
 
 ## 🗄️ 存储配置
 
