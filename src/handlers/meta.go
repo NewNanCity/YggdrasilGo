@@ -37,7 +37,11 @@ func (h *MetaHandler) GetAPIMetadata(c *gin.Context) {
 	}
 
 	// 计算ALI API Location
-	scheme := middleware.ResolveRequestScheme(c.GetHeader("X-Forwarded-Proto"), c.Request.TLS != nil)
+	forwardedProto := ""
+	if h.config.IsTrustedProxy(c.Request.RemoteAddr) {
+		forwardedProto = c.GetHeader("X-Forwarded-Proto")
+	}
+	scheme := middleware.ResolveRequestScheme(forwardedProto, c.Request.TLS != nil)
 	apiLocation := h.config.GetAPILocation(scheme, host)
 
 	// 尝试从缓存获取响应（包含API Location，避免不同scheme污染）

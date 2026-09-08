@@ -52,14 +52,19 @@ func (f *DefaultStorageFactory) createDatabaseStorage(config *config.StorageConf
 
 // createBlessingSkinStorage 创建BlessingSkin存储
 func (f *DefaultStorageFactory) createBlessingSkinStorage(config *config.StorageConfig, textureConfig *config.TextureConfig) (storage.Storage, error) {
+	databaseDSN := config.BlessingSkinOptions.DatabaseDSN
+	if config.BlessingSkinOptions.EffectiveDatabaseDSN != "" {
+		databaseDSN = config.BlessingSkinOptions.EffectiveDatabaseDSN
+	}
 	// 准备存储选项
 	options := map[string]any{
-		"database_dsn":              config.BlessingSkinOptions.DatabaseDSN,
+		"database_dsn":              databaseDSN,
 		"debug":                     config.BlessingSkinOptions.Debug,
 		"texture_base_url_override": config.BlessingSkinOptions.TextureBaseURLOverride,
 		"salt":                      config.BlessingSkinOptions.Security.Salt,
 		"pwd_method":                config.BlessingSkinOptions.Security.PwdMethod,
 		"app_key":                   config.BlessingSkinOptions.Security.AppKey,
+		"preload_legacy_uuids":      !config.SharedAuth,
 	}
 
 	// 准备材质配置

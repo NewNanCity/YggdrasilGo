@@ -190,9 +190,11 @@ server:
   debug: false
   base_url: ""
   api_location: "https://api.example.com/"  # ALI: 明确告知客户端后续应访问的 API Base URL
+  trusted_proxies: [] # 仅填写可直接连接本服务的代理 IP/CIDR
 
 # 认证配置
 auth:
+  mode: legacy # legacy 或 shared_mysql；后者只用于 BlessingSkin 同库 MySQL
   jwt_secret: "your-super-secret-jwt-key-change-in-production"
   token_expiration: 72h0m0s
   tokens_limit: 10
@@ -298,6 +300,7 @@ server:
   port: 8080
   base_url: ""
   api_location: "https://api.example.com/"
+  trusted_proxies: ["10.0.0.0/8"] # 按实际直连代理网段填写
 ```
 
 如果你希望按请求动态推导（基于请求的 scheme + host + base_url），可以留空：
@@ -308,7 +311,7 @@ server:
   api_location: ""
 ```
 
-> 留空时，服务会根据请求自动生成类似 `https://your-host/api/yggdrasil/` 的地址。
+> 留空时，服务会根据请求自动生成类似 `https://your-host/api/yggdrasil/` 的地址。只有直连来源命中 `trusted_proxies` 时才读取 `X-Forwarded-For` 与 `X-Forwarded-Proto`；默认列表为空。
 
 
 ## 🗄️ 存储配置
@@ -334,7 +337,10 @@ storage:
 storage:
   type: "blessing_skin"
   blessingskin_options:
-    database_dsn: "user:password@tcp(localhost:3306)/blessingskin?charset=utf8mb4&parseTime=True&loc=Local"
+    database_dsn: "user:password@tcp(rds.example.com:3306)/blessingskin?charset=utf8mb4&parseTime=true&loc=UTC&timeout=5s&readTimeout=10s&writeTimeout=10s"
+    database_tls:
+      ca_path: "/app/conf/ApsaraDB-CA-Chain.pem"
+      server_name: "rds.example.com"
     texture_base_url_override: false # false=从options读取site_url, true=使用配置文件的texture.base_url
     debug: false # 开启调试模式查看SQL查询
 
@@ -344,6 +350,8 @@ storage:
       pwd_method: "BCRYPT" # 与环境变量PWD_METHOD一致
       app_key: "base64:your_app_key_here" # 与环境变量APP_KEY一致
 ```
+
+`shared_mysql` 强制使用上述 CA 校验和主机名校验，最低 TLS 1.2；DSN 中不得再设置 `tls=true`、`preferred` 或 `skip-verify`。CA 文件应从 RDS 控制台下载并随运行配置只读挂载。
 
 **特点**：
 - ✅ 与BlessingSkin完全兼容
@@ -853,6 +861,10 @@ cache:
   session:
     type: "redis"
 ```
+
+## 🌐 多实例共享认证
+
+共享认证的表结构、改密撤销、UUID 迁移和四地切换细节见 [实施规格](docs/shared-auth-design.md) 与 [部署检查点](docs/shared-auth-deployment.md)。[事务核心、迁移工具、HTTP 接入及隔离 MySQL 测试](src/sharedauth/README.md) 已实现；显式 `shared_mysql` 复用 BlessingSkin 同库连接，省略模式保持 legacy。生产迁移、配置和四地发布仍未执行。
 
 ## 🔍 故障排除
 

@@ -55,3 +55,6 @@ Thumbs.db
 # Temporary files
 /tmp/
 *.tmp
+
+# Local deployment credentials and sensitive migration plans
+/.local/

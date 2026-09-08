@@ -2,14 +2,51 @@
 package blessing_skin
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
+	"yggdrasil-api-go/src/sharedauth"
 	storage "yggdrasil-api-go/src/storage/interface"
 	"yggdrasil-api-go/src/yggdrasil"
 
 	"gorm.io/gorm"
 )
+
+// GetSharedProfile resolves profile data by the Go-owned pid/UUID mapping.
+// It never reads or writes the legacy uuid.name mapping.
+func (s *Storage) GetSharedProfile(ctx context.Context, identity sharedauth.Identity) (*yggdrasil.Profile, error) {
+	var row struct {
+		Name     string `gorm:"column:name"`
+		SkinHash string `gorm:"column:skin_hash"`
+		SkinType string `gorm:"column:skin_type"`
+		CapeHash string `gorm:"column:cape_hash"`
+	}
+	err := s.db.WithContext(ctx).Table("players p").Select(`p.name,
+		s.hash AS skin_hash, s.type AS skin_type,
+		c.hash AS cape_hash`).
+		Joins("LEFT JOIN textures s ON p.tid_skin = s.tid AND p.tid_skin > 0").
+		Joins("LEFT JOIN textures c ON p.tid_cape = c.tid AND p.tid_cape > 0").
+		Where("p.pid = ? AND p.uid = ?", identity.PlayerID, identity.OwnerID).Take(&row).Error
+	if err != nil {
+		return nil, fmt.Errorf("shared profile not found: %w", err)
+	}
+	profileID := sharedauth.FormatUUID(identity.UUID)
+	textures, err := yggdrasil.GenerateTexturesProperty(profileID, row.Name,
+		textureURL(s, row.SkinHash), textureURL(s, row.CapeHash), row.SkinType == "alex")
+	if err != nil {
+		return nil, fmt.Errorf("generate shared profile properties: %w", err)
+	}
+	properties := []yggdrasil.ProfileProperty{{Name: "textures", Value: textures}}
+	return &yggdrasil.Profile{ID: profileID, Name: row.Name, Properties: properties}, nil
+}
+
+func textureURL(s *Storage, hash string) string {
+	if hash == "" {
+		return ""
+	}
+	return s.getTextureURL(hash)
+}
 
 // GetProfileByUUID 根据UUID获取角色（单查询优化版）
 func (s *Storage) GetProfileByUUID(uuid string) (*yggdrasil.Profile, error) {

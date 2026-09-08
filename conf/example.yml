@@ -7,9 +7,11 @@ server:
   debug: false
   base_url: "" # API基础路径，如 "/api/yggdrasil"
   api_location: "" # Authlib-Injector ALI地址，例如 "https://api.example.com/"（留空则按请求动态生成）
+  trusted_proxies: [] # 仅填写可直接连接本服务的反向代理 IP/CIDR；默认不信任转发头
 
 # 认证配置
 auth:
+  mode: legacy # legacy 或 shared_mysql；shared_mysql 仅适用于 BlessingSkin 同库主 MySQL
   token_expiration: 72h # Token过期时间
   jwt_secret: "yggdrasil-api-secret-key-change-in-production-32chars-minimum"
   tokens_limit: 10
@@ -32,7 +34,10 @@ storage:
     debug: false
 
   blessingskin_options:
-    database_dsn: "user:password@tcp(localhost:3306)/blessing_skin?charset=utf8mb4&parseTime=True&loc=Local"
+    database_dsn: "user:password@tcp(rds.example.com:3306)/blessing_skin?charset=utf8mb4&parseTime=true&loc=UTC&timeout=5s&readTimeout=10s&writeTimeout=10s"
+    database_tls: # shared_mysql 必填；DSN 不要另加 tls 参数
+      ca_path: "/app/conf/ApsaraDB-CA-Chain.pem"
+      server_name: "rds.example.com"
     debug: false
     texture_base_url_override: false
     security:

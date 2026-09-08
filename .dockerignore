@@ -1,0 +1,16 @@
+.git
+.github
+.local
+.vscode
+.idea
+conf/*
+!conf/example.yml
+data
+dist
+logs
+storage
+tmp
+working-delta
+*.log
+*.tmp
+*.test

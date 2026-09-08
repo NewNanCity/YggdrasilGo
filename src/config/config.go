@@ -2,12 +2,20 @@
 package config
 
 import (
+	"crypto/sha256"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
 	"fmt"
+	"net"
+	"net/netip"
 	"net/url"
 	"os"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/go-sql-driver/mysql"
 	"gopkg.in/yaml.v3"
 )
 
@@ -34,6 +42,7 @@ type StorageConfig struct {
 	FileOptions         FileStorageOptions         `yaml:"file_options"`         // 文件存储选项
 	DatabaseOptions     DatabaseStorageOptions     `yaml:"database_options"`     // 数据库存储选项
 	BlessingSkinOptions BlessingSkinStorageOptions `yaml:"blessingskin_options"` // BlessingSkin存储选项
+	SharedAuth          bool                       `yaml:"-"`                    // 运行时派生；禁用 legacy UUID 预热
 }
 
 // MemoryStorageOptions 内存存储选项
@@ -55,9 +64,17 @@ type DatabaseStorageOptions struct {
 // BlessingSkinStorageOptions BlessingSkin存储选项
 type BlessingSkinStorageOptions struct {
 	DatabaseDSN            string               `yaml:"database_dsn"`              // MySQL连接字符串
+	DatabaseTLS            MySQLTLSConfig       `yaml:"database_tls"`              // MySQL服务端身份校验
+	EffectiveDatabaseDSN   string               `yaml:"-"`                         // 校验后注入TLS配置的DSN
 	Debug                  bool                 `yaml:"debug"`                     // 调试模式
 	TextureBaseURLOverride bool                 `yaml:"texture_base_url_override"` // 为true时使用配置文件的texture.base_url而不是options中的site_url
 	Security               BlessingSkinSecurity `yaml:"security"`                  // 安全配置
+}
+
+// MySQLTLSConfig configures verified server-only TLS for the RDS connection.
+type MySQLTLSConfig struct {
+	CAPath     string `yaml:"ca_path"`
+	ServerName string `yaml:"server_name"`
 }
 
 // BlessingSkinSecurity BlessingSkin安全配置
@@ -162,10 +179,11 @@ type MonitoringConfig struct {
 
 // SecurityConfig 安全配置
 type SecurityConfig struct {
-	MaxRequestSize string        `yaml:"max_request_size"` // 最大请求大小
-	ReadTimeout    time.Duration `yaml:"read_timeout"`     // 读取超时
-	WriteTimeout   time.Duration `yaml:"write_timeout"`    // 写入超时
-	IdleTimeout    time.Duration `yaml:"idle_timeout"`     // 空闲超时
+	MaxRequestSize  string        `yaml:"max_request_size"` // 最大请求大小
+	MaxRequestBytes int64         `yaml:"-"`                // 校验后派生的字节上限
+	ReadTimeout     time.Duration `yaml:"read_timeout"`     // 读取超时
+	WriteTimeout    time.Duration `yaml:"write_timeout"`    // 写入超时
+	IdleTimeout     time.Duration `yaml:"idle_timeout"`     // 空闲超时
 }
 
 // WarmupConfig 预热配置
@@ -180,15 +198,18 @@ type WarmupConfig struct {
 
 // ServerConfig 服务器配置
 type ServerConfig struct {
-	Host        string `yaml:"host"`         // 监听地址
-	Port        int    `yaml:"port"`         // 监听端口
-	Debug       bool   `yaml:"debug"`        // 调试模式
-	BaseURL     string `yaml:"base_url"`     // API基础路径，如 "/api/yggdrasil"
-	APILocation string `yaml:"api_location"` // 对外发布的API根地址（ALI），为空则按请求动态生成
+	Host                 string         `yaml:"host"`            // 监听地址
+	Port                 int            `yaml:"port"`            // 监听端口
+	Debug                bool           `yaml:"debug"`           // 调试模式
+	BaseURL              string         `yaml:"base_url"`        // API基础路径，如 "/api/yggdrasil"
+	APILocation          string         `yaml:"api_location"`    // 对外发布的API根地址（ALI），为空则按请求动态生成
+	TrustedProxies       []string       `yaml:"trusted_proxies"` // 可直接连接本服务的可信代理 IP/CIDR
+	trustedProxyPrefixes []netip.Prefix `yaml:"-"`
 }
 
 // AuthConfig 认证配置
 type AuthConfig struct {
+	Mode                string        `yaml:"mode"`                 // 认证模式：legacy 或 shared_mysql
 	TokenExpiration     time.Duration `yaml:"token_expiration"`     // 令牌过期时间
 	JWTSecret           string        `yaml:"jwt_secret"`           // JWT密钥
 	TokensLimit         int           `yaml:"tokens_limit"`         // 每用户令牌数量限制
@@ -275,9 +296,33 @@ func SaveConfig(config *Config, filename string) error {
 
 // Validate 验证配置
 func (c *Config) Validate() error {
+	if c.Security.MaxRequestSize == "" {
+		c.Security.MaxRequestSize = "1MB"
+	}
+	requestBytes, err := parseByteSize(c.Security.MaxRequestSize)
+	if err != nil {
+		return fmt.Errorf("invalid security.max_request_size: %w", err)
+	}
+	c.Security.MaxRequestBytes = requestBytes
+	for name, value := range map[string]*time.Duration{
+		"read_timeout": &c.Security.ReadTimeout, "write_timeout": &c.Security.WriteTimeout,
+		"idle_timeout": &c.Security.IdleTimeout,
+	} {
+		if *value < 0 {
+			return fmt.Errorf("security.%s must not be negative", name)
+		}
+	}
 	// 验证服务器配置
 	if c.Server.Port <= 0 || c.Server.Port > 65535 {
 		return fmt.Errorf("invalid server port: %d", c.Server.Port)
+	}
+	c.Server.trustedProxyPrefixes = nil
+	for _, raw := range c.Server.TrustedProxies {
+		prefix, err := parseIPPrefix(raw)
+		if err != nil {
+			return fmt.Errorf("invalid server.trusted_proxies entry %q: %w", raw, err)
+		}
+		c.Server.trustedProxyPrefixes = append(c.Server.trustedProxyPrefixes, prefix)
 	}
 
 	// 验证BaseURL格式
@@ -320,9 +365,46 @@ func (c *Config) Validate() error {
 		c.Server.APILocation = parsedURL.String()
 	}
 
-	// 验证JWT密钥
-	if len(c.Auth.JWTSecret) < 32 {
+	if c.Auth.Mode == "" {
+		c.Auth.Mode = "legacy"
+	}
+	if c.Auth.Mode != "legacy" && c.Auth.Mode != "shared_mysql" {
+		return fmt.Errorf("unsupported auth mode: %s", c.Auth.Mode)
+	}
+	c.Storage.SharedAuth = false
+	if c.Auth.Mode == "legacy" && len(c.Auth.JWTSecret) < 32 {
 		return fmt.Errorf("JWT secret must be at least 32 characters long")
+	}
+	if c.Auth.Mode == "shared_mysql" {
+		if c.Storage.Type != "blessing_skin" {
+			return fmt.Errorf("auth mode shared_mysql requires blessing_skin storage")
+		}
+		if c.Auth.TokensLimit <= 0 {
+			return fmt.Errorf("shared_mysql tokens_limit must be positive")
+		}
+		if c.Auth.TokenExpiration <= 0 || c.Security.ReadTimeout <= 0 {
+			return fmt.Errorf("shared_mysql token_expiration and security.read_timeout must be positive")
+		}
+		dsn, err := mysql.ParseDSN(c.Storage.BlessingSkinOptions.DatabaseDSN)
+		if err != nil {
+			return fmt.Errorf("invalid shared_mysql BlessingSkin database DSN: %w", err)
+		}
+		if !dsn.ParseTime {
+			return fmt.Errorf("shared_mysql BlessingSkin database DSN requires parseTime=true")
+		}
+		if err := c.PrepareBlessingSkinDSN(dsn); err != nil {
+			return fmt.Errorf("invalid shared_mysql BlessingSkin database transport: %w", err)
+		}
+		c.Storage.SharedAuth = true
+	}
+	if c.Security.ReadTimeout == 0 {
+		c.Security.ReadTimeout = 30 * time.Second
+	}
+	if c.Security.WriteTimeout == 0 {
+		c.Security.WriteTimeout = 30 * time.Second
+	}
+	if c.Security.IdleTimeout == 0 {
+		c.Security.IdleTimeout = 60 * time.Second
 	}
 
 	// 验证密钥文件路径（对于BlessingSkin存储，允许为空）
@@ -340,6 +422,99 @@ func (c *Config) Validate() error {
 	}
 
 	return nil
+}
+
+// PrepareBlessingSkinDSN registers a CA-verified TLS profile and updates the parsed DSN.
+func (c *Config) PrepareBlessingSkinDSN(dsn *mysql.Config) error {
+	options := &c.Storage.BlessingSkinOptions
+	if options.DatabaseTLS.CAPath == "" || options.DatabaseTLS.ServerName == "" {
+		return errors.New("database_tls.ca_path and database_tls.server_name are required")
+	}
+	if dsn.Net != "tcp" || dsn.Addr == "" {
+		return errors.New("database DSN must use an explicit tcp endpoint")
+	}
+	host, _, err := net.SplitHostPort(dsn.Addr)
+	if err != nil || !strings.EqualFold(host, options.DatabaseTLS.ServerName) {
+		return errors.New("database_tls.server_name must match the DSN endpoint host")
+	}
+	if dsn.TLSConfig != "" {
+		return errors.New("database DSN must not set tls; verified TLS is derived from database_tls")
+	}
+	if dsn.Timeout <= 0 || dsn.ReadTimeout <= 0 || dsn.WriteTimeout <= 0 {
+		return errors.New("database DSN requires positive timeout, readTimeout, and writeTimeout")
+	}
+	caPEM, err := os.ReadFile(options.DatabaseTLS.CAPath)
+	if err != nil {
+		return fmt.Errorf("read database CA: %w", err)
+	}
+	roots := x509.NewCertPool()
+	if !roots.AppendCertsFromPEM(caPEM) {
+		return errors.New("database CA contains no PEM certificates")
+	}
+	digest := sha256.Sum256(append(append([]byte(nil), caPEM...), []byte(options.DatabaseTLS.ServerName)...))
+	tlsName := fmt.Sprintf("ygg-rds-%x", digest[:8])
+	if err := mysql.RegisterTLSConfig(tlsName, &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		RootCAs:    roots,
+		ServerName: options.DatabaseTLS.ServerName,
+	}); err != nil {
+		return fmt.Errorf("register verified database TLS: %w", err)
+	}
+	dsn.TLSConfig = tlsName
+	options.EffectiveDatabaseDSN = dsn.FormatDSN()
+	return nil
+}
+
+func parseIPPrefix(raw string) (netip.Prefix, error) {
+	if prefix, err := netip.ParsePrefix(raw); err == nil {
+		return prefix.Masked(), nil
+	}
+	addr, err := netip.ParseAddr(raw)
+	if err != nil {
+		return netip.Prefix{}, errors.New("must be an IP address or CIDR")
+	}
+	return netip.PrefixFrom(addr, addr.BitLen()), nil
+}
+
+// IsTrustedProxy reports whether the direct peer is explicitly trusted.
+func (c *Config) IsTrustedProxy(remoteAddr string) bool {
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	addr, err := netip.ParseAddr(host)
+	if err != nil {
+		return false
+	}
+	for _, prefix := range c.Server.trustedProxyPrefixes {
+		if prefix.Contains(addr) {
+			return true
+		}
+	}
+	return false
+}
+
+func parseByteSize(value string) (int64, error) {
+	normalized := strings.ToUpper(strings.TrimSpace(value))
+	multiplier := int64(1)
+	for _, suffix := range []struct {
+		name       string
+		multiplier int64
+	}{
+		{"MIB", 1024 * 1024}, {"MB", 1000 * 1000},
+		{"KIB", 1024}, {"KB", 1000}, {"B", 1},
+	} {
+		if strings.HasSuffix(normalized, suffix.name) {
+			normalized = strings.TrimSpace(strings.TrimSuffix(normalized, suffix.name))
+			multiplier = suffix.multiplier
+			break
+		}
+	}
+	amount, err := strconv.ParseInt(normalized, 10, 64)
+	if err != nil || amount <= 0 || amount > (1<<63-1)/multiplier {
+		return 0, errors.New("must be a positive byte count using B, KB, KiB, MB, or MiB")
+	}
+	return amount * multiplier, nil
 }
 
 // validateDomainOrCIDR 验证域名格式
@@ -441,6 +616,7 @@ func DefaultConfig() *Config {
 			APILocation: "", // 默认为空，表示按请求动态生成
 		},
 		Auth: AuthConfig{
+			Mode:                "legacy",
 			TokenExpiration:     3 * 24 * time.Hour, // 3天
 			JWTSecret:           "yggdrasil-api-secret-key-change-in-production",
 			TokensLimit:         10,

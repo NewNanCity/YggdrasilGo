@@ -1,12 +1,16 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"strconv"
 
 	"yggdrasil-api-go/src/config"
+	"yggdrasil-api-go/src/sharedauth"
 	storage "yggdrasil-api-go/src/storage/interface"
 	"yggdrasil-api-go/src/utils"
+	"yggdrasil-api-go/src/yggdrasil"
 
 	"github.com/gin-gonic/gin"
 )
@@ -15,6 +19,14 @@ import (
 type ProfileHandler struct {
 	storage storage.Storage
 	config  *config.Config
+	shared  *sharedauth.Service
+}
+
+// NewSharedProfileHandler uses the Go-owned pid/UUID mapping for public profiles.
+func NewSharedProfileHandler(storage storage.Storage, cfg *config.Config, service *sharedauth.Service) *ProfileHandler {
+	handler := NewProfileHandler(storage, cfg)
+	handler.shared = service
+	return handler
 }
 
 // NewProfileHandler 创建新的角色处理器
@@ -39,6 +51,31 @@ func (h *ProfileHandler) GetProfileByUUID(c *gin.Context) {
 		if parsed, err := strconv.ParseBool(unsignedParam); err == nil {
 			unsigned = parsed
 		}
+	}
+	if h.shared != nil {
+		identity, err := h.shared.ResolveIdentityByUUID(c.Request.Context(), uuid)
+		if err != nil {
+			respondSharedProfileError(c, err)
+			return
+		}
+		provider, ok := h.storage.(sharedProfileProvider)
+		if !ok {
+			utils.RespondError(c, 500, "InternalServerError", "Shared profile provider is unavailable")
+			return
+		}
+		profileCtx, cancel := context.WithTimeout(c.Request.Context(), h.config.Security.ReadTimeout)
+		defer cancel()
+		profile, err := provider.GetSharedProfile(profileCtx, identity)
+		if err != nil {
+			utils.RespondError(c, 500, "InternalServerError", "Failed to query profile")
+			return
+		}
+		if err := h.applySharedProfileSignatures(profile, unsigned); err != nil {
+			utils.RespondError(c, 500, "InternalServerError", "Failed to sign profile")
+			return
+		}
+		utils.RespondJSONFast(c, profile)
+		return
 	}
 
 	// 获取角色信息
@@ -119,6 +156,21 @@ func (h *ProfileHandler) SearchMultipleProfiles(c *gin.Context) {
 		utils.RespondForbiddenOperation(c, "Too many profiles requested")
 		return
 	}
+	if h.shared != nil {
+		identities, err := h.shared.ResolveIdentitiesByNames(c.Request.Context(), names)
+		if err != nil {
+			respondSharedProfileError(c, err)
+			return
+		}
+		result := make([]map[string]string, 0, len(identities))
+		for _, identity := range identities {
+			result = append(result, map[string]string{
+				"id": sharedauth.FormatUUID(identity.UUID), "name": identity.Name,
+			})
+		}
+		utils.RespondJSONFast(c, result)
+		return
+	}
 
 	// 批量查询角色
 	profiles, err := h.storage.GetProfilesByNames(names)
@@ -147,6 +199,17 @@ func (h *ProfileHandler) SearchSingleProfile(c *gin.Context) {
 		utils.RespondIllegalArgument(c, "Missing username parameter")
 		return
 	}
+	if h.shared != nil {
+		identity, err := h.shared.ResolveIdentityByName(c.Request.Context(), username)
+		if err != nil {
+			respondSharedProfileError(c, err)
+			return
+		}
+		utils.RespondJSONFast(c, map[string]string{
+			"id": sharedauth.FormatUUID(identity.UUID), "name": identity.Name,
+		})
+		return
+	}
 
 	// 获取角色信息
 	profile, err := h.storage.GetProfileByName(username)
@@ -163,4 +226,33 @@ func (h *ProfileHandler) SearchSingleProfile(c *gin.Context) {
 	}
 
 	utils.RespondJSONFast(c, result)
+}
+
+func (h *ProfileHandler) applySharedProfileSignatures(profile *yggdrasil.Profile, unsigned bool) error {
+	for i := range profile.Properties {
+		if unsigned {
+			profile.Properties[i].Signature = ""
+			continue
+		}
+		if profile.Properties[i].Signature != "" {
+			continue
+		}
+		signature, err := h.generateSignature(profile.Properties[i].Value)
+		if err != nil {
+			return fmt.Errorf("sign profile property: %w", err)
+		}
+		profile.Properties[i].Signature = signature
+	}
+	return nil
+}
+
+func respondSharedProfileError(c *gin.Context, err error) {
+	switch {
+	case errors.Is(err, sharedauth.ErrNotFound), errors.Is(err, sharedauth.ErrIdentityConflict):
+		utils.RespondNoContent(c)
+	case errors.Is(err, sharedauth.ErrNotReady), errors.Is(err, sharedauth.ErrCommitUnknown):
+		utils.RespondError(c, 503, "ServiceUnavailable", "Shared profile service is unavailable")
+	default:
+		utils.RespondError(c, 500, "InternalServerError", "Failed to query profiles")
+	}
 }

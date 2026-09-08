@@ -1,10 +1,13 @@
 package handlers
 
 import (
+	"fmt"
 	"strings"
 	"time"
 
 	"yggdrasil-api-go/src/cache"
+	"yggdrasil-api-go/src/config"
+	"yggdrasil-api-go/src/sharedauth"
 	storage "yggdrasil-api-go/src/storage/interface"
 	"yggdrasil-api-go/src/utils"
 	"yggdrasil-api-go/src/yggdrasil"
@@ -17,6 +20,8 @@ type AuthHandler struct {
 	storage      storage.Storage
 	tokenCache   cache.TokenCache
 	sessionCache cache.SessionCache
+	shared       *sharedauth.Service
+	tokenLimit   int
 }
 
 // NewAuthHandler 创建新的认证处理器
@@ -26,6 +31,13 @@ func NewAuthHandler(storage storage.Storage, tokenCache cache.TokenCache, sessio
 		tokenCache:   tokenCache,
 		sessionCache: sessionCache,
 	}
+}
+
+// NewSharedAuthHandler adds the shared MySQL path while preserving the legacy constructor.
+func NewSharedAuthHandler(storage storage.Storage, tokenCache cache.TokenCache, sessionCache cache.SessionCache, service *sharedauth.Service, cfg config.AuthConfig) *AuthHandler {
+	h := NewAuthHandler(storage, tokenCache, sessionCache)
+	h.shared, h.tokenLimit = service, cfg.TokensLimit
+	return h
 }
 
 // Authenticate 用户登录认证
@@ -39,6 +51,10 @@ func (h *AuthHandler) Authenticate(c *gin.Context) {
 	// 验证必填字段
 	if req.Username == "" || req.Password == "" {
 		utils.RespondIllegalArgument(c, utils.MsgEmptyCredentials)
+		return
+	}
+	if h.shared != nil {
+		h.authenticateShared(c, req)
 		return
 	}
 
@@ -121,11 +137,59 @@ func (h *AuthHandler) Authenticate(c *gin.Context) {
 	utils.RespondJSONFast(c, response)
 }
 
+func (h *AuthHandler) authenticateShared(c *gin.Context, req yggdrasil.AuthenticateRequest) {
+	result, err := h.shared.Authenticate(c.Request.Context(), req.Username, req.Password, req.ClientToken, h.tokenLimit)
+	if err != nil {
+		respondSharedAuthError(c, err, false)
+		return
+	}
+	profiles := sharedProfiles(result.AvailableProfiles)
+	var selected *yggdrasil.Profile
+	if result.Token.Identity != nil {
+		for i := range profiles {
+			if profiles[i].ID == sharedauth.FormatUUID(result.Token.Identity.UUID) {
+				selected = &profiles[i]
+				break
+			}
+		}
+	}
+	response := yggdrasil.AuthenticateResponse{
+		AccessToken: result.Token.AccessToken, ClientToken: result.Token.ClientToken,
+		AvailableProfiles: profiles, SelectedProfile: selected,
+	}
+	if req.RequestUser {
+		response.User = &yggdrasil.UserInfo{ID: fmt.Sprintf("%d", result.Token.OwnerID), Properties: []yggdrasil.ProfileProperty{}}
+	}
+	utils.RespondJSONFast(c, response)
+}
+
 // Refresh 刷新访问令牌
 func (h *AuthHandler) Refresh(c *gin.Context) {
 	var req yggdrasil.RefreshRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.RespondIllegalArgument(c, "Invalid request format")
+		return
+	}
+	if h.shared != nil {
+		selected := ""
+		if req.SelectedProfile != nil {
+			selected = req.SelectedProfile.ID
+		}
+		result, err := h.shared.Refresh(c.Request.Context(), req.AccessToken, req.ClientToken, selected)
+		if err != nil {
+			respondSharedAuthError(c, err, true)
+			return
+		}
+		var profile *yggdrasil.Profile
+		if result.Identity != nil {
+			profiles := sharedProfiles([]sharedauth.Identity{*result.Identity})
+			profile = &profiles[0]
+		}
+		response := yggdrasil.RefreshResponse{AccessToken: result.AccessToken, ClientToken: result.ClientToken, SelectedProfile: profile}
+		if req.RequestUser {
+			response.User = &yggdrasil.UserInfo{ID: fmt.Sprintf("%d", result.OwnerID), Properties: []yggdrasil.ProfileProperty{}}
+		}
+		utils.RespondJSONFast(c, response)
 		return
 	}
 
@@ -229,6 +293,14 @@ func (h *AuthHandler) Validate(c *gin.Context) {
 		utils.RespondIllegalArgument(c, "Invalid request format")
 		return
 	}
+	if h.shared != nil {
+		if _, err := h.shared.Validate(c.Request.Context(), req.AccessToken, req.ClientToken); err != nil {
+			respondSharedAuthError(c, err, true)
+			return
+		}
+		utils.RespondNoContent(c)
+		return
+	}
 
 	// 获取并验证令牌
 	token, err := h.tokenCache.Get(req.AccessToken)
@@ -254,6 +326,14 @@ func (h *AuthHandler) Invalidate(c *gin.Context) {
 		utils.RespondIllegalArgument(c, "Invalid request format")
 		return
 	}
+	if h.shared != nil {
+		if err := h.shared.Invalidate(c.Request.Context(), req.AccessToken, req.ClientToken); err != nil {
+			respondSharedAuthError(c, err, true)
+			return
+		}
+		utils.RespondNoContent(c)
+		return
+	}
 
 	// 删除令牌（无论是否存在都返回204）
 	h.tokenCache.Delete(req.AccessToken)
@@ -265,6 +345,14 @@ func (h *AuthHandler) Signout(c *gin.Context) {
 	var req yggdrasil.SignoutRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.RespondIllegalArgument(c, "Invalid request format")
+		return
+	}
+	if h.shared != nil {
+		if err := h.shared.Signout(c.Request.Context(), req.Username, req.Password); err != nil {
+			respondSharedAuthError(c, err, false)
+			return
+		}
+		utils.RespondNoContent(c)
 		return
 	}
 

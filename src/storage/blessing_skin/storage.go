@@ -2,9 +2,12 @@
 package blessing_skin
 
 import (
+	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
+	"yggdrasil-api-go/src/sharedauth"
 	storage "yggdrasil-api-go/src/storage/interface"
 
 	"gorm.io/driver/mysql"
@@ -110,10 +113,18 @@ func NewStorage(options map[string]any, textureConfig *TextureConfig) (storage.S
 
 	// 配置管理器已在NewOptionsManager中初始化，无需重复调用
 
-	// UUID缓存预热
-	if err := storage.preloadUUIDs(); err != nil {
-		// 预热失败不影响启动，只记录警告
-		fmt.Printf("⚠️  UUID cache preload failed: %v\n", err)
+	preloadLegacyUUIDs := true
+	if configured, exists := options["preload_legacy_uuids"]; exists {
+		if value, ok := configured.(bool); ok {
+			preloadLegacyUUIDs = value
+		}
+	}
+	if preloadLegacyUUIDs {
+		// Legacy mode still relies on name-based UUID mappings.
+		if err := storage.preloadUUIDs(); err != nil {
+			// 预热失败不影响启动，只记录警告
+			fmt.Printf("⚠️  UUID cache preload failed: %v\n", err)
+		}
 	}
 
 	return storage, nil
@@ -208,6 +219,41 @@ func (s *Storage) preloadUUIDs() error {
 // GetDB 获取数据库实例（内部使用）
 func (s *Storage) GetDB() *gorm.DB {
 	return s.db
+}
+
+// SharedAuthDB exposes the same primary connection used for BlessingSkin data.
+func (s *Storage) SharedAuthDB() (*sql.DB, error) {
+	if s.db == nil {
+		return nil, fmt.Errorf("blessing skin database is not connected")
+	}
+	return s.db.DB()
+}
+
+type sharedAccountPolicy struct {
+	storage             *Storage
+	requireVerification bool
+}
+
+func (p sharedAccountPolicy) Allowed(permission int, verified bool) bool {
+	return permission != -1 && (!p.requireVerification || verified)
+}
+
+func (p sharedAccountPolicy) VerifyPassword(password, storedHash string) bool {
+	return p.storage.verifyPassword(password, storedHash)
+}
+
+// SharedAuthPolicy adapts only explicitly supported BlessingSkin password rules.
+func (s *Storage) SharedAuthPolicy(requireVerification bool) (sharedauth.AccountPolicy, error) {
+	if s.config == nil {
+		return nil, fmt.Errorf("blessing skin configuration is unavailable")
+	}
+	method := strings.ToUpper(s.config.PwdMethod)
+	switch method {
+	case "BCRYPT", "ARGON2I", "PHP_PASSWORD_HASH", "MD5", "SALTED2MD5", "SHA256", "SALTED2SHA256", "SHA512", "SALTED2SHA512":
+		return sharedAccountPolicy{storage: s, requireVerification: requireVerification}, nil
+	default:
+		return nil, fmt.Errorf("unsupported BlessingSkin password method %q", s.config.PwdMethod)
+	}
 }
 
 // GetUUIDGenerator 获取UUID生成器（内部使用）

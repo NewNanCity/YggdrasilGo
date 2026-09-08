@@ -1,11 +1,15 @@
 package handlers
 
 import (
+	"context"
+	"errors"
 	"fmt"
+	"net/netip"
 	"time"
 
 	"yggdrasil-api-go/src/cache"
 	"yggdrasil-api-go/src/config"
+	"yggdrasil-api-go/src/sharedauth"
 	storage "yggdrasil-api-go/src/storage/interface"
 	"yggdrasil-api-go/src/utils"
 	"yggdrasil-api-go/src/yggdrasil"
@@ -19,6 +23,14 @@ type SessionHandler struct {
 	tokenCache   cache.TokenCache
 	sessionCache cache.SessionCache
 	config       *config.Config
+	shared       *sharedauth.Service
+}
+
+// NewSharedSessionHandler adds the shared MySQL session path.
+func NewSharedSessionHandler(storage storage.Storage, tokenCache cache.TokenCache, sessionCache cache.SessionCache, cfg *config.Config, service *sharedauth.Service) *SessionHandler {
+	h := NewSessionHandler(storage, tokenCache, sessionCache, cfg)
+	h.shared = service
+	return h
 }
 
 // NewSessionHandler 创建新的会话处理器
@@ -36,6 +48,19 @@ func (h *SessionHandler) Join(c *gin.Context) {
 	var req yggdrasil.JoinRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
 		utils.RespondIllegalArgument(c, "Invalid request format")
+		return
+	}
+	if h.shared != nil {
+		ip, err := netip.ParseAddr(c.ClientIP())
+		if err != nil {
+			utils.RespondIllegalArgument(c, "Invalid client IP")
+			return
+		}
+		if err := h.shared.Join(c.Request.Context(), req.AccessToken, req.SelectedProfile, req.ServerID, ip); err != nil {
+			respondSharedAuthError(c, err, true)
+			return
+		}
+		utils.RespondNoContent(c)
 		return
 	}
 
@@ -78,6 +103,50 @@ func (h *SessionHandler) HasJoined(c *gin.Context) {
 
 	if username == "" || serverID == "" {
 		utils.RespondIllegalArgument(c, "Missing required parameters")
+		return
+	}
+	if h.shared != nil {
+		var ip netip.Addr
+		var err error
+		if clientIP != "" {
+			ip, err = netip.ParseAddr(clientIP)
+			if err != nil {
+				utils.RespondNoContent(c)
+				return
+			}
+		}
+		identity, err := h.shared.HasJoined(c.Request.Context(), username, serverID, ip)
+		if err != nil {
+			if errors.Is(err, sharedauth.ErrInvalid) || errors.Is(err, sharedauth.ErrIdentityConflict) {
+				utils.RespondNoContent(c)
+			} else {
+				respondSharedAuthError(c, err, true)
+			}
+			return
+		}
+		provider, ok := h.storage.(sharedProfileProvider)
+		if !ok {
+			respondSharedAuthError(c, errors.New("shared profile provider is unavailable"), true)
+			return
+		}
+		profileCtx, cancel := context.WithTimeout(c.Request.Context(), h.config.Security.ReadTimeout)
+		defer cancel()
+		profile, err := provider.GetSharedProfile(profileCtx, identity)
+		if err != nil {
+			respondSharedAuthError(c, err, true)
+			return
+		}
+		for i := range profile.Properties {
+			if profile.Properties[i].Signature == "" {
+				signature, signErr := h.generateSignature(profile.Properties[i].Value)
+				if signErr != nil {
+					respondSharedAuthError(c, signErr, true)
+					return
+				}
+				profile.Properties[i].Signature = signature
+			}
+		}
+		utils.RespondJSON(c, profile)
 		return
 	}
 

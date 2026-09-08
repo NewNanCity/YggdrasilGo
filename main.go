@@ -2,9 +2,12 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
 	"path"
 	"strings"
 	"time"
@@ -13,7 +16,9 @@ import (
 	"yggdrasil-api-go/src/config"
 	"yggdrasil-api-go/src/handlers"
 	"yggdrasil-api-go/src/middleware"
+	"yggdrasil-api-go/src/sharedauth"
 	storage_factory "yggdrasil-api-go/src/storage"
+	"yggdrasil-api-go/src/storage/blessing_skin"
 	"yggdrasil-api-go/src/utils"
 
 	"github.com/gin-gonic/gin"
@@ -43,8 +48,9 @@ func main() {
 		log.Printf("✅ RSA key pair will be loaded from BlessingSkin database options table")
 	}
 
-	// 设置JWT密钥
-	utils.SetJWTSecret(cfg.Auth.JWTSecret)
+	if cfg.Auth.Mode == "legacy" {
+		utils.SetJWTSecret(cfg.Auth.JWTSecret)
+	}
 
 	// 创建存储实例
 	storageFactory := storage_factory.NewStorageFactory()
@@ -56,38 +62,76 @@ func main() {
 
 	log.Printf("✅ Using %s storage", store.GetStorageType())
 
-	// 创建缓存实例
-	cacheFactory := cache.NewCacheFactory()
-	tokenCache, err := cacheFactory.CreateTokenCache(cfg.Cache.Token.Type, cfg.Cache.Token.Options)
-	if err != nil {
-		log.Fatalf("Failed to create token cache: %v", err)
-	}
-	sessionCache, err := cacheFactory.CreateSessionCache(cfg.Cache.Session.Type, cfg.Cache.Session.Options)
-	if err != nil {
-		log.Fatalf("Failed to create session cache: %v", err)
+	mode := cfg.Auth.Mode
+	var tokenCache cache.TokenCache
+	var sessionCache cache.SessionCache
+	if mode == "legacy" {
+		cacheFactory := cache.NewCacheFactory()
+		tokenCache, err = cacheFactory.CreateTokenCache(cfg.Cache.Token.Type, cfg.Cache.Token.Options)
+		if err != nil {
+			log.Fatalf("Failed to create token cache: %v", err)
+		}
+		sessionCache, err = cacheFactory.CreateSessionCache(cfg.Cache.Session.Type, cfg.Cache.Session.Options)
+		if err != nil {
+			log.Fatalf("Failed to create session cache: %v", err)
+		}
+		log.Printf("✅ Token cache initialized: %s", cfg.Cache.Token.Type)
+		log.Printf("✅ Session cache initialized: %s", cfg.Cache.Session.Type)
 	}
 
-	log.Printf("✅ Token cache initialized: %s", cfg.Cache.Token.Type)
-	log.Printf("✅ Session cache initialized: %s", cfg.Cache.Session.Type)
-
-	// 初始化用户缓存配置
-	if cfg.Cache.User.Enabled {
+	// shared_mysql authorization must not preheat legacy name-to-UUID state.
+	if mode == "legacy" && cfg.Cache.User.Enabled {
 		cache.InitUserCache(cfg.Cache.User.Duration)
 		log.Printf("✅ User cache initialized: %v duration", cfg.Cache.User.Duration)
-	} else {
+	} else if mode == "legacy" {
 		log.Printf("ℹ️  User cache disabled")
 	}
 
-	// 缓存预热
-	if err := utils.WarmupCaches(cfg, store); err != nil {
-		log.Printf("⚠️  Cache warmup failed: %v", err)
+	if mode == "legacy" {
+		if err := utils.WarmupCaches(cfg, store); err != nil {
+			log.Printf("⚠️  Cache warmup failed: %v", err)
+		}
+	}
+
+	var sharedService *sharedauth.Service
+	if mode == "shared_mysql" {
+		blessingStore, ok := store.(*blessing_skin.Storage)
+		if !ok {
+			log.Fatal("auth.mode shared_mysql requires storage.type blessing_skin")
+		}
+		db, dbErr := blessingStore.SharedAuthDB()
+		if dbErr != nil {
+			log.Fatalf("Failed to access shared BlessingSkin database: %v", dbErr)
+		}
+		accountPolicy, policyErr := blessingStore.SharedAuthPolicy(cfg.Auth.RequireVerification)
+		if policyErr != nil {
+			log.Fatalf("Failed to configure BlessingSkin account policy: %v", policyErr)
+		}
+		sharedService, err = sharedauth.NewAuth(db, cfg.Security.ReadTimeout, cfg.Auth.TokenExpiration, accountPolicy)
+		if err != nil {
+			log.Fatalf("Failed to configure shared authentication: %v", err)
+		}
+		if err := sharedService.Ready(context.Background()); err != nil {
+			log.Fatalf("Shared authentication is not ready: %v", err)
+		}
+		if _, err := sharedService.CleanupExpired(context.Background(), 1000); err != nil {
+			log.Fatalf("Shared authentication cleanup check failed: %v", err)
+		}
+		log.Printf("✅ Shared MySQL authentication initialized")
 	}
 
 	// 创建处理器（直接传入存储和缓存）
 	metaHandler := handlers.NewMetaHandler(store, cfg)
 	authHandler := handlers.NewAuthHandler(store, tokenCache, sessionCache)
 	sessionHandler := handlers.NewSessionHandler(store, tokenCache, sessionCache, cfg)
+	if sharedService != nil {
+		authHandler = handlers.NewSharedAuthHandler(store, tokenCache, sessionCache, sharedService, cfg.Auth)
+		sessionHandler = handlers.NewSharedSessionHandler(store, tokenCache, sessionCache, cfg, sharedService)
+	}
 	profileHandler := handlers.NewProfileHandler(store, cfg)
+	if sharedService != nil {
+		profileHandler = handlers.NewSharedProfileHandler(store, cfg, sharedService)
+	}
 	textureHandler := handlers.NewTextureHandler(store)
 
 	// 设置Gin模式
@@ -97,10 +141,14 @@ func main() {
 	router := gin.New()
 	router.RemoveExtraSlash = true
 	router.RedirectTrailingSlash = true
+	if err := router.SetTrustedProxies(cfg.Server.TrustedProxies); err != nil {
+		log.Fatalf("Failed to configure trusted proxies: %v", err)
+	}
 
 	// 添加中间件
 	router.Use(gin.Logger())
 	router.Use(gin.Recovery())
+	router.Use(middleware.LimitRequestBody(cfg.Security.MaxRequestBytes))
 	router.Use(middleware.CORS())
 	router.Use(middleware.PerformanceMonitor()) // 性能监控中间件
 
@@ -164,8 +212,12 @@ func main() {
 		apiGroup.DELETE("/user/profile/:uuid/:textureType", textureHandler.DeleteTexture)
 	}
 
-	// 启动清理协程
-	go startCleanupRoutines(tokenCache, sessionCache)
+	// 启动清理协程（支持分布式部署）
+	if mode == "legacy" {
+		go startCleanupRoutines(tokenCache, sessionCache)
+	} else {
+		go startSharedCleanup(sharedService)
+	}
 
 	// 启动服务器
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
@@ -183,12 +235,35 @@ func main() {
 		log.Printf("📍 Base URL: %s", cfg.Server.BaseURL)
 	}
 
-	if err := router.Run(addr); err != nil {
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           router,
+		ReadHeaderTimeout: cfg.Security.ReadTimeout,
+		ReadTimeout:       cfg.Security.ReadTimeout,
+		WriteTimeout:      cfg.Security.WriteTimeout,
+		IdleTimeout:       cfg.Security.IdleTimeout,
+	}
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
 		log.Fatalf("Failed to start server: %v", err)
 	}
 }
 
-// startCleanupRoutines 启动清理协程
+func startSharedCleanup(service *sharedauth.Service) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		result, err := service.CleanupExpired(context.Background(), 1000)
+		if err != nil {
+			log.Printf("Shared authentication cleanup failed: %v", err)
+			continue
+		}
+		if result.Tokens != 0 || result.Sessions != 0 {
+			log.Printf("Shared authentication cleanup removed tokens=%d sessions=%d", result.Tokens, result.Sessions)
+		}
+	}
+}
+
+// startCleanupRoutines 启动 legacy 清理协程。
 func startCleanupRoutines(tokenCache cache.TokenCache, sessionCache cache.SessionCache) {
 	ticker := time.NewTicker(5 * time.Minute) // 每5分钟清理一次
 	defer ticker.Stop()
