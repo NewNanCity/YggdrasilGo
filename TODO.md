@@ -1,5 +1,17 @@
 # 当前任务
 
+## blocked 身份可审计解析（2026-09-18）
+
+目标：在不删除身份行、不重生成 UUID、不改变 BlessingSkin 角色及 NNM 处罚的前提下，将六个已人工确认的 blocked/reserved 对解析为稳定 active 身份。
+
+- [x] 运行时兼容 schema v1/v2，未知版本继续 fail closed。
+- [x] 提供独立的 v2 schema upgrade/activate/deactivate/downgrade，并在隔离 MySQL 演练正向和回退。
+- [x] 提供私有解析决定 → 解析计划 → 摘要确认 → apply/verify/activate/deactivate/rollback 流程；生产数据不写入仓库或日志。
+- [x] 覆盖正常、漂移、引用、错误摘要、并发/回退边界，完成 race、vet、build 和自审。
+- [ ] 发布不可变镜像，先滚动兼容运行时，再执行 v2 schema 和六项解析，完成数据库与公开只读 profile 验收。
+
+非目标：不处理 PHP OAuth/OIDC 旧读路径，不改玩家名称、旧 `uuid` 表、NNM 绑定/封禁或其他部署组件。任何玩家/UUID 占用漂移、相关引用新增、迁移回退失败或生产健康异常均立即停止。
+
 ## shared_mysql 生产发布
 
 目标：在保留 BlessingSkin 用户、玩家、UUID 和材质数据的前提下，将四地 Yggdrasil API 切换到同一 Aliyun RDS MySQL 8 事务事实源。

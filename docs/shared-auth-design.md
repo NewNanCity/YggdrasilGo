@@ -1,6 +1,6 @@
 # BlessingSkin 与 Go 共享认证实施规格
 
-状态：2026-09-07，具体方案已批准进入本地实现和隔离数据库验证，包含安全触发器及其故障耦合。本文件不是生产执行授权。当前 [共享认证核心](../src/sharedauth/README.md) 及 shared_mysql 启动/HTTP/资料适配已在本地实现并做隔离测试，尚未迁移旧数据或发布。
+状态：2026-09-18。shared_mysql 初始迁移和运行时已经落地；本文件继续作为身份不变量、schema v2 解析和回退边界的事实源。生产执行仍须遵守 [部署检查点](shared-auth-deployment.md) 和私有计划摘要确认。
 
 ## 1. 本轮契约与事实源
 
@@ -73,7 +73,7 @@ Go 的新主路径不再读写旧 `uuid.name` 作为实时身份映射。按名�
 
 ## 4. Go 自有表提案
 
-使用同一 RDS **主库、同一数据库**内的固定 `ygg_go_` 前缀，所有表 InnoDB。对应的 [显式 schema 迁移](../src/sharedauth/migrations/migrations.go) 已在隔离 MySQL 验证；数据回填计划尚未实现，运行时禁止 AutoMigrate。
+使用同一 RDS **主库、同一数据库**内的固定 `ygg_go_` 前缀，所有表 InnoDB。对应的 [显式 schema 迁移](../src/sharedauth/migrations/migrations.go)、初始回填计划和 blocked 身份解析计划均已实现并在隔离 MySQL 验证；运行时禁止 AutoMigrate。
 
 ID 使用 `BIGINT UNSIGNED` 容纳现有非负 uid/pid；Go 使用有范围检查的类型转换，不能通过负数转换“修复”历史记录。UUID 和令牌哈希均二进制存储，不受文本排序规则影响。时间为 UTC `DATETIME(6)`，事务内由数据库当前时间决定过期，节点本地时钟仅用于请求期限。
 
@@ -84,13 +84,14 @@ ID 使用 `BIGINT UNSIGNED` 容纳现有非负 uid/pid；Go 使用有范围检�
 | identity_id | BIGINT UNSIGNED，PK，自增 | Go 内部引用，不是公开 UUID |
 | player_id | BIGINT UNSIGNED，NULL，UNIQUE | 绑定 pid；孤立旧 UUID 没有 pid |
 | uuid | BINARY(16)，NULL，UNIQUE | 已有值保持；待处理角色暂不发值 |
-| state | VARCHAR(8)，ASCII 二进制排序，NOT NULL | active / retired / reserved / blocked |
+| state | VARCHAR(8)，ASCII 二进制排序，NOT NULL | active / retired / reserved / blocked / resolved |
 | legacy_mapping_id | BIGINT UNSIGNED，NULL，UNIQUE | 唯一可采用旧映射的来源 id；复杂冲突证据保留在旧表及私有迁移计划 |
+| resolved_into_identity_id | BIGINT UNSIGNED，NULL，自引用 FK | schema v2 审计链接；resolved 行指向最终 active 身份，RESTRICT 更新/删除 |
 | created_at / updated_at | DATETIME(6)，NOT NULL | 运维审计时间，不决定归属 |
 
-CHECK 组合：active/retired 必须同时有 pid 与 UUID；reserved 必须有 UUID、无 pid；blocked 必须有 pid、无 UUID。非 NULL 的 ID 必须大于零。UNIQUE 的 NULL 允许多个待处理项，不允许多个实际 UUID 或 pid 归属。
+CHECK 组合：active/retired 必须同时有 pid 与 UUID；reserved 必须有 UUID、无 pid；blocked 必须有 pid、无 UUID；resolved 必须释放 pid、UUID、来源映射并带解析目标。v2 的 INSERT/UPDATE 触发器禁止解析到自身，外键保证目标存在。非 NULL 的 ID 必须大于零。UNIQUE 的 NULL 允许多个待处理项，不允许多个实际 UUID 或 pid 归属。
 
-active 的 pid/UUID 不可更改；删除角色后记录保留，后台只可标记 retired，授权路径即使未标记也因实时角色不存在而拒绝。reserved 永不自动分配；blocked 的解除必须另行人工确认数据计划。禁止从身份表 DELETE，禁止把保留旧值当作随机碰撞后可覆盖的记录。
+active 的 pid/UUID 不可更改；删除角色后记录保留，后台只可标记 retired，授权路径即使未标记也因实时角色不存在而拒绝。reserved 永不自动分配；blocked 只有经显式审批计划才能转为 resolved，并由原 reserved 行承接同一 UUID。禁止从身份表 DELETE，禁止把保留旧值当作随机碰撞后可覆盖的记录。
 
 ### 4.2 `ygg_go_auth_subjects`
 
@@ -137,7 +138,7 @@ runtime 不得删除本表记录。这里不存密码、密码哈希副本、明
 | 字段 | 类型与约束 | 用途 |
 | --- | --- | --- |
 | id | TINYINT UNSIGNED，PK，CHECK id=1 | 单行运行门闩 |
-| schema_version | INT UNSIGNED，NOT NULL | 兼容性检查，初版 1 |
+| schema_version | INT UNSIGNED，NOT NULL | 兼容性检查；1 为初始身份表，2 增加 resolved 审计解析 |
 | phase | VARCHAR(8)，ASCII 二进制排序 | CHECK staged / active |
 | player_high_watermark | BIGINT UNSIGNED，NOT NULL | 最终冻结快照时已存在的最大 pid |
 | migration_id | BINARY(16)，NOT NULL | 对应经批准的数据计划 |
@@ -228,6 +229,16 @@ watermark 只适用于已确认的单调 pid 分配方式；备份导入、手�
 DDL 与数据回填分别具备 upgrade/downgrade 设计，但不能承诺任意时刻无损回到旧身份算法：激活前、确认无新依赖数据时可以按逆序卸载钩子/新表；一旦已签发新身份，禁止直接旧镜像回滚或删除新表。此后只能回到理解同一新 schema 的已验证版本，必要时先关闭认证、保留身份记录再恢复。
 
 备份回退可能让 generation 和 token 一起回到旧值；恢复后必须重新完成统一撤销才开放认证。任何清理/回滚计划不得恢复旧 uuid.name 写者，也不得丢弃已经对外使用的新 UUID。
+
+### 6.3 已审查冲突的 schema v2 解析
+
+初始迁移保留的 blocked/reserved 对不通过删除、覆盖或重新分类整个快照处理。操作者先提交只含 player ID、blocked identity ID、reserved identity ID 和完整旧映射 ID 集合的私有审批文件；dry-run 从当前数据库读取名称、排序规则等价集合和 UUID，生成另一个需摘要确认的私有计划。
+
+schema v2 只新增 `resolved_into_identity_id`、自引用外键、resolved 状态约束和自解析保护触发器。DDL 安装、版本激活、数据解析分开执行。兼容运行时先部署并同时接受 v1/v2；未知版本继续拒绝。数据 apply 只允许 staged 门闩，在一个 REPEATABLE READ 事务中锁定 state、玩家、全部等价旧映射和两条身份，并确认两条身份无 token 或可关联的 join session 引用。
+
+每项解析保留两行：blocked 行释放 pid/UUID/来源映射，变成指向目标的 resolved 审计行；reserved 行保留 identity ID、UUID 和来源映射，获得 player ID 并变成 active。每次 UPDATE 必须恰好影响一行，事务后再次核验 resolved → active 指向。`resolution-activate` 复核 v2 DDL、四个安全触发器和最终身份形态后才重新开放门闩。
+
+回退先关闭门闩，且只有两条身份仍无 token/session 引用时才能按逆序恢复 reserved 和 blocked。存在 resolved 行时禁止降低 schema 版本或卸载 v2 DDL。解析回退后，原始全量计划仍需复核全部身份行才能重新激活；任何来源或引用漂移均停止，不做猜测性兼容。
 
 ## 7. 配置、权限与现有后端
 

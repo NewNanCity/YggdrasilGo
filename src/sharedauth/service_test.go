@@ -199,4 +199,33 @@ func TestMySQLIdentity(t *testing.T) {
 			t.Fatal("runtime ignored closed migration gate", err)
 		}
 	})
+	t.Run("readiness_accepts_verified_v2_and_rejects_unknown_versions", func(t *testing.T) {
+		s, db := fixture(t, server)
+		if err := migrations.UpgradeResolutionSchema(t.Context(), db); err != nil {
+			t.Fatal(err)
+		}
+		if err := migrations.ActivateResolutionSchema(t.Context(), db); err != nil {
+			t.Fatal(err)
+		}
+		if err := s.Ready(t.Context()); err != nil {
+			t.Fatal("verified v2 schema remained closed", err)
+		}
+		mustExec(t, db, "UPDATE ygg_go_state SET schema_version=3")
+		if err := s.Ready(t.Context()); !errors.Is(err, ErrNotReady) {
+			t.Fatal("unknown schema version did not fail closed", err)
+		}
+	})
+}
+
+func TestSupportedSchemaVersion(t *testing.T) {
+	for _, version := range []int{1, 2} {
+		if !supportedSchemaVersion(version) {
+			t.Fatalf("schema version %d should be supported", version)
+		}
+	}
+	for _, version := range []int{0, 3} {
+		if supportedSchemaVersion(version) {
+			t.Fatalf("schema version %d should fail closed", version)
+		}
+	}
 }

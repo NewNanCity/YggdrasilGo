@@ -9,7 +9,7 @@
 | `New` / `EnsureIdentity` | 使用调用方提供的同库连接池；当前 pid 解析稳定身份，只有切换水位之后的新 pid 可申请 v4 |
 | `NewAuth` | 另要求显式 `AccountPolicy`、事务期限和令牌期限；账号规则由已核实版本的 BlessingSkin 适配器负责，不能使用测试策略上线 |
 | `Authenticate` | 先验证密码再在事务中复核当前账号；申请/列出已确认身份，在账号限额内签发令牌，满额则淘汰最早旧令牌 |
-| `Ready` | 检查 active 门闩、schema 版本、主库只读标志及必要 InnoDB 表；不创建/修复 schema |
+| `Ready` | 检查 active 门闩、受支持的 schema v1/v2、主库只读标志及必要 InnoDB 表；v2 另核验解析列，不创建/修复 schema |
 | `Validate` / `Refresh` | 核验当前账号、撤销版本、角色归属和客户端绑定；刷新原子删旧插新，提交后才返回不透明 token |
 | `Invalidate` / `Signout` | 精确撤销或推进账号撤销版本；不存在 token 可幂等处理，数据库故障不能当作成功 |
 | `Join` / `HasJoined` | 30 秒共享会话；同绑定重试不延长期限，验证每次重查授权与当前名称，不消费会话 |
@@ -35,7 +35,7 @@
 
 ## 显式迁移
 
-[migrations](migrations/migrations.go) 包提供 `Upgrade`、`VerifyHooks` 和 `Downgrade`，无 CLI 自动执行入口。七个 SQL 文件各是一条语句，包含五张 Go 表和两个 users 触发器，不包含任何旧 UUID 回填或 state 激活数据。
+[migrations](migrations/migrations.go) 包提供初始 schema 及解析 schema v2 的显式 upgrade/verify/activate/deactivate/downgrade。初始七个 SQL 文件包含五张 Go 表和两个 users 触发器；v2 增加 resolved 审计链接、自引用外键和防止自解析的 INSERT/UPDATE 触发器。运行时不会自动执行这些操作。
 
 Upgrade 要求经批准的独占维护窗口：先核实版本、users 引擎和既有触发器；遇到已有目标表停止，不自动采用或覆盖。MySQL DDL 分步提交，失败时可能留下部分新结构，应人工检查，不能盲重试或自动删除。Downgrade 仅允许所有新表完全无数据且所有写者已停止的场景；即使只有撤销锚点或 staged 数据也拒绝删除。代码的空表检查不能代替关闭并发写者。
 
@@ -44,6 +44,8 @@ Upgrade 要求经批准的独占维护窗口：先核实版本、users 引擎和
 `VerifyHooks` 检查两个触发器的名字、所属表、时机、事件及完整正文。该查询需要 users 的 TRIGGER 权限，必须由迁移/运维侧完成，再将经验证的数据计划置 active；运行账号不能为检查元数据获得创建/删除触发器的能力。运行时 Ready 不能发现被高权限操作者擅自改写/删除的触发器，运维必须先关闭认证门闩，再操作/复核安全对象。[MySQL 元数据权限](https://dev.mysql.com/doc/refman/8.0/en/information-schema-triggers-table.html)
 
 [migrationplan](migrationplan/README.md) 与 `cmd/shared-auth-migrate` 已实现全量分类、私有 dry-run、staged apply、verify、activate 和保留数据的 deactivate。工具完成不等于生产授权；禁止手工激活空迁移或绕过 plan SHA-256/数据库名确认。所有已有 UUID 保留，不重新生成或清理孤立行。
+
+[resolutionplan](resolutionplan/README.md) 处理经人工确认的 blocked/reserved 对。解析计划绑定显式身份 ID、完整排序规则等价旧映射、UUID 和零引用前提；apply、activate、deactivate、rollback 均保持身份行并受 staged 门闩控制。schema v2 兼容运行时接受 v1/v2，其他版本继续 fail closed。
 
 ## 验证
 

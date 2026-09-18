@@ -20,6 +20,15 @@ var (
 	ErrCommitUnknown    = errors.New("transaction commit outcome is unknown")
 )
 
+const (
+	schemaVersionV1 = 1
+	schemaVersionV2 = 2
+)
+
+func supportedSchemaVersion(version int) bool {
+	return version == schemaVersionV1 || version == schemaVersionV2
+}
+
 type Identity struct {
 	ID       uint64
 	PlayerID uint64
@@ -108,7 +117,7 @@ func transact[T any](ctx context.Context, s *Service, fn func(context.Context, *
 	if err != nil {
 		return zero, err
 	}
-	if version != 1 || phase != "active" {
+	if !supportedSchemaVersion(version) || phase != "active" {
 		return zero, ErrNotReady
 	}
 	result, err := fn(ctx, tx, watermark)
@@ -125,6 +134,10 @@ func transact[T any](ctx context.Context, s *Service, fn func(context.Context, *
 // Trigger definitions are verified by migrations.VerifyHooks before activation.
 func (s *Service) Ready(ctx context.Context) error {
 	_, err := transact(ctx, s, func(ctx context.Context, tx *sql.Tx, _ uint64) (struct{}, error) {
+		var version int
+		if err := tx.QueryRowContext(ctx, "SELECT schema_version FROM ygg_go_state WHERE id=1").Scan(&version); err != nil {
+			return struct{}{}, err
+		}
 		var tables int
 		err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()
 			 AND ENGINE='InnoDB' AND TABLE_NAME IN ('users','players','ygg_go_state','ygg_go_identities',
@@ -134,6 +147,17 @@ func (s *Service) Ready(ctx context.Context) error {
 		}
 		if tables != 7 {
 			return struct{}{}, ErrNotReady
+		}
+		if version == schemaVersionV2 {
+			var columns int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM information_schema.COLUMNS
+				WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ygg_go_identities'
+				AND COLUMN_NAME='resolved_into_identity_id'`).Scan(&columns); err != nil {
+				return struct{}{}, err
+			}
+			if columns != 1 {
+				return struct{}{}, ErrNotReady
+			}
 		}
 		return struct{}{}, nil
 	})

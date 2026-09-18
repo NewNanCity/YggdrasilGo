@@ -1,6 +1,6 @@
 # 四地 shared_mysql 部署检查点
 
-状态：代码和隔离 MySQL 验证已完成；本文是执行清单，不表示生产 DDL、回填、激活或实例切换已经发生。
+状态：2026-09-18 初始 shared_mysql 已在生产 active；本文保留初始切换记录，并增加 schema v2 blocked 身份解析的执行与回退清单。
 
 ## 固定边界
 
@@ -19,6 +19,17 @@
 3. 用稳定迁移身份依次执行 `schema-upgrade`、`verify-hooks`、`apply`、`verify`。每一步失败即停止；MySQL DDL 可能部分提交，禁止盲重试或自动 downgrade。
 4. 对照同一 plan SHA-256 执行 `activate`，再次 `verify`。只在 active 后将所有实例配置为 `auth.mode: shared_mysql`。
 5. 先启动一个可控实例，验证元数据、公钥指纹、匿名资料、合成账号认证/刷新/撤销和游戏服 Join/HasJoined；再逐地启动。NewNanCity 留给用户在 MCSM 操作。
+
+## schema v2 身份解析窗口
+
+1. 只读复核待解析的 player、blocked/reserved identity、全部排序规则等价旧映射、UUID 和 token/session 引用；任何一项偏离审批记录即停止。
+2. 先发布同时支持 schema v1/v2 的不可变运行时，并在 v1 active 下完成 rollout/readiness。不得先把数据库版本改成旧运行时不理解的 v2。
+3. 使用迁移身份依次执行 `schema-upgrade-v2`、`schema-verify-v2`、`schema-activate-v2`。DDL 与版本激活分离；任一步失败后检查实际对象，不盲重试。
+4. 从私有审批生成 `resolution-dry-run` 计划并记录 SHA-256。冻结玩家写入、将所有 Yggdrasil 写者缩到 0，再用初始计划执行 `deactivate` 关闭门闩。
+5. 按同一解析摘要执行 `resolution-apply` 和 `resolution-verify`。核对总行数不变，active 增加审批数，blocked/reserved 各减少审批数，resolved 增加审批数，UUID 仍唯一且绑定目标 player。
+6. 执行 `resolution-activate`，恢复运行时副本；检查 rollout、readiness、错误日志和每个历史 UUID 的公开 profile。恢复 BlessingSkin 玩家写入前再做一次计数和引用核验。
+
+解析回退顺序为 `resolution-deactivate` → `resolution-rollback` → 使用初始全量计划 `activate`。仅当目标身份没有 token/session 引用时 rollback 才会执行。若还要卸载 v2，随后执行 `schema-deactivate-v2` → `schema-downgrade-v2`；存在任何 resolved 行时必须保留 v2。所有私有审批、计划和数据库备份只放 `.local/shared-auth/`，不得进入 Git 或终端汇报。
 
 ## 回退
 

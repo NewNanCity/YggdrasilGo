@@ -129,6 +129,8 @@ go run ./cmd/shared-auth-migrate dry-run `
 
 `schema-upgrade`、`apply`、`activate` 和 `deactivate` 都是生产写操作，需要明确的数据库与计划摘要确认。完整顺序、冻结条件与回退限制见 [共享认证部署说明](docs/shared-auth-deployment.md)；身份模型与失败语义见 [共享认证设计](docs/shared-auth-design.md)。
 
+初始迁移后需要解除人工确认的 blocked 身份时，使用独立的 schema v2 与 `resolution-*` 命令。它保留原 blocked 行作为 resolved 审计链接，并把原 reserved UUID 行转为 active；不会按名称猜测、重生成 UUID 或删除身份。审批与解析计划同样只能放在 `.local/shared-auth/`，详见 [迁移工具说明](src/sharedauth/migrationplan/README.md)。
+
 ## 开发与验证
 
 常规检查：

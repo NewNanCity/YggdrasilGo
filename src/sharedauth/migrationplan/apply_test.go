@@ -166,4 +166,29 @@ func TestMySQLApplyVerifyAndPhaseGate(t *testing.T) {
 			t.Fatalf("failed activation changed phase=%q err=%v", phase, err)
 		}
 	})
+	t.Run("deactivate_accepts_additive_resolution_schema", func(t *testing.T) {
+		plan, db := fixture(t)
+		if err := Apply(t.Context(), db, *plan, 100); err != nil {
+			t.Fatal(err)
+		}
+		if err := Activate(t.Context(), db, *plan, 100); err != nil {
+			t.Fatal(err)
+		}
+		if err := migrations.UpgradeResolutionSchema(t.Context(), db); err != nil {
+			t.Fatal(err)
+		}
+		if err := migrations.ActivateResolutionSchema(t.Context(), db); err != nil {
+			t.Fatal(err)
+		}
+		if err := Deactivate(t.Context(), db, *plan); err != nil {
+			t.Fatal(err)
+		}
+		var phase string
+		if err := db.QueryRow("SELECT phase FROM ygg_go_state WHERE id=1").Scan(&phase); err != nil || phase != "staged" {
+			t.Fatalf("v2 deactivation phase=%q err=%v", phase, err)
+		}
+		if err := Activate(t.Context(), db, *plan, 100); err != nil {
+			t.Fatal("v2 schema blocked reactivation after identity rollback", err)
+		}
+	})
 }

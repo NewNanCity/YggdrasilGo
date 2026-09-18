@@ -74,6 +74,88 @@ func TestMySQLSchema(t *testing.T) {
 			t.Fatal("downgrade must retain identities")
 		}
 	})
+	t.Run("resolution_schema_has_separate_ddl_and_version_lifecycle", func(t *testing.T) {
+		db := fixture(t)
+		migrationID := make([]byte, 16)
+		migrationID[0] = 1
+		execSQL(t, db, `INSERT INTO ygg_go_state
+			(id, schema_version, phase, player_high_watermark, migration_id, activated_at)
+			VALUES (1, 1, 'active', 10, ?, UTC_TIMESTAMP(6))`, migrationID)
+		if err := UpgradeResolutionSchema(t.Context(), db); err != nil {
+			t.Fatal(err)
+		}
+		if err := VerifyResolutionSchema(t.Context(), db); err != nil {
+			t.Fatal(err)
+		}
+		var version int
+		if err := db.QueryRow("SELECT schema_version FROM ygg_go_state WHERE id=1").Scan(&version); err != nil || version != 1 {
+			t.Fatalf("DDL changed schema version: version=%d err=%v", version, err)
+		}
+		if err := ActivateResolutionSchema(t.Context(), db); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.QueryRow("SELECT schema_version FROM ygg_go_state WHERE id=1").Scan(&version); err != nil || version != 2 {
+			t.Fatalf("schema activation version=%d err=%v", version, err)
+		}
+		if err := DeactivateResolutionSchema(t.Context(), db); err != nil {
+			t.Fatal(err)
+		}
+		if err := DowngradeResolutionSchema(t.Context(), db); err != nil {
+			t.Fatal(err)
+		}
+		var columns int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM information_schema.COLUMNS
+			WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='ygg_go_identities'
+			AND COLUMN_NAME='resolved_into_identity_id'`).Scan(&columns); err != nil || columns != 0 {
+			t.Fatalf("resolution column remains: columns=%d err=%v", columns, err)
+		}
+	})
+	t.Run("resolved_identity_is_retained_and_blocks_schema_downgrade", func(t *testing.T) {
+		db := fixture(t)
+		migrationID := make([]byte, 16)
+		migrationID[0] = 2
+		execSQL(t, db, `INSERT INTO ygg_go_state
+			(id, schema_version, phase, player_high_watermark, migration_id, activated_at)
+			VALUES (1, 1, 'active', 10, ?, UTC_TIMESTAMP(6))`, migrationID)
+		if err := UpgradeResolutionSchema(t.Context(), db); err != nil {
+			t.Fatal(err)
+		}
+		if err := ActivateResolutionSchema(t.Context(), db); err != nil {
+			t.Fatal(err)
+		}
+		uuid := make([]byte, 16)
+		uuid[0] = 3
+		execSQL(t, db, `INSERT INTO ygg_go_identities
+			(identity_id, player_id, uuid, state, legacy_mapping_id, resolved_into_identity_id, created_at, updated_at)
+			VALUES (100, NULL, ?, 'reserved', 9, NULL, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`, uuid)
+		execSQL(t, db, `INSERT INTO ygg_go_identities
+			(identity_id, player_id, uuid, state, legacy_mapping_id, resolved_into_identity_id, created_at, updated_at)
+			VALUES (101, NULL, NULL, 'resolved', NULL, 100, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`)
+		if _, err := db.Exec(`INSERT INTO ygg_go_identities
+			(identity_id, player_id, uuid, state, legacy_mapping_id, resolved_into_identity_id, created_at, updated_at)
+			VALUES (102, NULL, NULL, 'resolved', NULL, 102, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`); err == nil {
+			t.Fatal("self-resolved identity was accepted")
+		}
+		execSQL(t, db, "ALTER TABLE ygg_go_identities AUTO_INCREMENT=200")
+		if _, err := db.Exec(`INSERT INTO ygg_go_identities
+			(player_id, uuid, state, legacy_mapping_id, resolved_into_identity_id, created_at, updated_at)
+			VALUES (NULL, NULL, 'resolved', NULL, 200, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`); err == nil {
+			t.Fatal("auto-increment self-resolved identity was accepted")
+		}
+		execSQL(t, db, `INSERT INTO ygg_go_identities
+			(identity_id, player_id, uuid, state, legacy_mapping_id, resolved_into_identity_id, created_at, updated_at)
+			VALUES (102, 12, NULL, 'blocked', NULL, NULL, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6))`)
+		if _, err := db.Exec(`UPDATE ygg_go_identities SET state='resolved', player_id=NULL,
+			resolved_into_identity_id=102 WHERE identity_id=102`); err == nil {
+			t.Fatal("self-resolved identity update was accepted")
+		}
+		if err := DeactivateResolutionSchema(t.Context(), db); err == nil {
+			t.Fatal("schema version was downgraded while resolved identities remain")
+		}
+		if err := DowngradeResolutionSchema(t.Context(), db); err == nil {
+			t.Fatal("resolution DDL was removed while resolved identities remain")
+		}
+	})
 	t.Run("password_bytes_aba_permission_and_delete", func(t *testing.T) {
 		db := fixture(t)
 		execSQL(t, db, "INSERT INTO users (uid, password, permission) VALUES (1, 'HashA', 0)")

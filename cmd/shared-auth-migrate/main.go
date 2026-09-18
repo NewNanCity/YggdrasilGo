@@ -18,11 +18,13 @@ import (
 	"yggdrasil-api-go/src/config"
 	"yggdrasil-api-go/src/sharedauth/migrationplan"
 	"yggdrasil-api-go/src/sharedauth/migrations"
+	"yggdrasil-api-go/src/sharedauth/resolutionplan"
 )
 
 type options struct {
 	config          string
 	plan            string
+	approvals       string
 	confirmDatabase string
 	confirmPlan     string
 	maxRows         int
@@ -38,12 +40,16 @@ func main() {
 
 func run(args []string) error {
 	if len(args) == 0 {
-		return errors.New("command required: dry-run, schema-upgrade, verify-hooks, apply, verify, activate, or deactivate")
+		return errors.New("command required")
 	}
 	command := args[0]
 	validCommands := map[string]struct{}{
 		"dry-run": {}, "schema-upgrade": {}, "verify-hooks": {}, "apply": {},
 		"verify": {}, "activate": {}, "deactivate": {},
+		"schema-upgrade-v2": {}, "schema-verify-v2": {}, "schema-activate-v2": {},
+		"schema-deactivate-v2": {}, "schema-downgrade-v2": {},
+		"resolution-dry-run": {}, "resolution-apply": {}, "resolution-verify": {},
+		"resolution-activate": {}, "resolution-deactivate": {}, "resolution-rollback": {},
 	}
 	if _, valid := validCommands[command]; !valid {
 		return fmt.Errorf("unknown command %q", command)
@@ -53,6 +59,7 @@ func run(args []string) error {
 	var opts options
 	flags.StringVar(&opts.config, "config", "conf/config.yml", "service config containing the BlessingSkin DSN")
 	flags.StringVar(&opts.plan, "plan", "", "private migration plan path")
+	flags.StringVar(&opts.approvals, "approvals", "", "private resolution approval selector path")
 	flags.StringVar(&opts.confirmDatabase, "confirm-database", "", "exact database name required for write commands")
 	flags.StringVar(&opts.confirmPlan, "confirm-plan-sha256", "", "exact plan SHA-256 required for plan write commands")
 	flags.IntVar(&opts.maxRows, "max-rows", 100000, "maximum rows allowed in each source table")
@@ -63,10 +70,15 @@ func run(args []string) error {
 	if flags.NArg() != 0 || opts.maxRows <= 0 || opts.timeout <= 0 {
 		return errors.New("unexpected arguments or non-positive limits")
 	}
-	if command == "dry-run" && opts.plan == "" {
+	if (command == "dry-run" || command == "resolution-dry-run") && opts.plan == "" {
 		return errors.New("dry-run requires -plan in a private, ignored directory")
 	}
-	if command != "dry-run" && command != "schema-upgrade" && command != "verify-hooks" && opts.plan == "" {
+	if command == "resolution-dry-run" && opts.approvals == "" {
+		return errors.New("resolution-dry-run requires -approvals in a private, ignored directory")
+	}
+	if command != "dry-run" && command != "resolution-dry-run" && command != "schema-upgrade" && command != "verify-hooks" &&
+		command != "schema-upgrade-v2" && command != "schema-verify-v2" && command != "schema-activate-v2" &&
+		command != "schema-deactivate-v2" && command != "schema-downgrade-v2" && opts.plan == "" {
 		return errors.New("plan path is required")
 	}
 	if opts.plan != "" {
@@ -75,6 +87,13 @@ func run(args []string) error {
 			return err
 		}
 		opts.plan = privatePath
+	}
+	if opts.approvals != "" {
+		privatePath, err := privatePlanPath(opts.approvals)
+		if err != nil {
+			return err
+		}
+		opts.approvals = privatePath
 	}
 
 	dsn, err := loadDSN(opts.config, os.Stdin)
@@ -121,11 +140,104 @@ func run(args []string) error {
 		}
 		fmt.Printf("schema-upgrade database=%q hooks=verified state=not-created\n", database)
 		return nil
+	case "schema-upgrade-v2":
+		if err := requireDatabaseConfirmation(database, opts.confirmDatabase); err != nil {
+			return err
+		}
+		if err := migrations.UpgradeResolutionSchema(ctx, db); err != nil {
+			return err
+		}
+		fmt.Printf("schema-upgrade-v2 database=%q status=ddl-verified version=1\n", database)
+		return nil
+	case "schema-verify-v2":
+		if err := migrations.VerifyResolutionSchema(ctx, db); err != nil {
+			return err
+		}
+		fmt.Printf("schema-verify-v2 database=%q status=ok\n", database)
+		return nil
+	case "schema-activate-v2":
+		if err := requireDatabaseConfirmation(database, opts.confirmDatabase); err != nil {
+			return err
+		}
+		if err := migrations.ActivateResolutionSchema(ctx, db); err != nil {
+			return err
+		}
+		fmt.Printf("schema-activate-v2 database=%q status=ok version=2\n", database)
+		return nil
+	case "schema-deactivate-v2":
+		if err := requireDatabaseConfirmation(database, opts.confirmDatabase); err != nil {
+			return err
+		}
+		if err := migrations.DeactivateResolutionSchema(ctx, db); err != nil {
+			return err
+		}
+		fmt.Printf("schema-deactivate-v2 database=%q status=ok version=1\n", database)
+		return nil
+	case "schema-downgrade-v2":
+		if err := requireDatabaseConfirmation(database, opts.confirmDatabase); err != nil {
+			return err
+		}
+		if err := migrations.DowngradeResolutionSchema(ctx, db); err != nil {
+			return err
+		}
+		fmt.Printf("schema-downgrade-v2 database=%q status=ok\n", database)
+		return nil
 	case "verify-hooks":
 		if err := migrations.VerifyHooks(ctx, db); err != nil {
 			return err
 		}
 		fmt.Printf("verify-hooks database=%q status=ok\n", database)
+		return nil
+	case "resolution-dry-run":
+		approvals, err := resolutionplan.LoadApprovals(opts.approvals)
+		if err != nil {
+			return err
+		}
+		plan, err := resolutionplan.Build(ctx, db, approvals, time.Now())
+		if err != nil {
+			return err
+		}
+		if err := resolutionplan.Save(opts.plan, plan); err != nil {
+			return err
+		}
+		digest, _ := plan.Digest()
+		printResolutionPlan("resolution-dry-run", database, plan, digest, "plan-created")
+		return nil
+	}
+	if command == "resolution-apply" || command == "resolution-verify" || command == "resolution-activate" ||
+		command == "resolution-deactivate" || command == "resolution-rollback" {
+		plan, err := resolutionplan.Load(opts.plan)
+		if err != nil {
+			return err
+		}
+		digest, err := plan.Digest()
+		if err != nil {
+			return err
+		}
+		if command != "resolution-verify" {
+			if err := requireDatabaseConfirmation(database, opts.confirmDatabase); err != nil {
+				return err
+			}
+			if opts.confirmPlan != digest {
+				return errors.New("plan SHA-256 confirmation does not match")
+			}
+		}
+		switch command {
+		case "resolution-apply":
+			err = resolutionplan.Apply(ctx, db, plan)
+		case "resolution-verify":
+			err = resolutionplan.Verify(ctx, db, plan)
+		case "resolution-activate":
+			err = resolutionplan.Activate(ctx, db, plan)
+		case "resolution-deactivate":
+			err = resolutionplan.Deactivate(ctx, db, plan)
+		case "resolution-rollback":
+			err = resolutionplan.Rollback(ctx, db, plan)
+		}
+		if err != nil {
+			return err
+		}
+		printResolutionPlan(command, database, plan, digest, "ok")
 		return nil
 	}
 
@@ -247,4 +359,8 @@ func printPlan(command, database string, plan migrationplan.Plan, digest, status
 	fmt.Printf("command=%s database=%q migration_id=%s plan_sha256=%s status=%q players=%d mappings=%d active=%d blocked=%d reserved=%d invalid_mappings=%d watermark=%d\n",
 		command, database, plan.MigrationID, digest, status, plan.Summary.Players, plan.Summary.Mappings,
 		plan.Summary.Active, plan.Summary.Blocked, plan.Summary.Reserved, plan.Summary.InvalidMappings, plan.PlayerHighWatermark)
+}
+
+func printResolutionPlan(command, database string, plan resolutionplan.Plan, digest, status string) {
+	fmt.Printf("command=%s database=%q plan_sha256=%s status=%q decisions=%d\n", command, database, digest, status, len(plan.Decisions))
 }

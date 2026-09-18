@@ -204,6 +204,15 @@ func Activate(ctx context.Context, db *sql.DB, plan Plan, maxRows int) error {
 	if err := migrations.VerifyHooks(ctx, db); err != nil {
 		return err
 	}
+	var schemaVersion int
+	if err := db.QueryRowContext(ctx, "SELECT schema_version FROM ygg_go_state WHERE id=1").Scan(&schemaVersion); err != nil {
+		return err
+	}
+	if schemaVersion == 2 {
+		if err := migrations.VerifyResolutionSchema(ctx, db); err != nil {
+			return err
+		}
+	}
 	return setPhase(ctx, db, plan, maxRows, "staged", "active")
 }
 
@@ -221,7 +230,7 @@ func Deactivate(ctx context.Context, db *sql.DB, plan Plan) error {
 		return err
 	}
 	defer tx.Rollback()
-	phase, exists, err := readState(ctx, tx, plan, true)
+	phase, exists, err := readStateForGateChange(ctx, tx, plan, true)
 	if err != nil {
 		return err
 	}
@@ -253,7 +262,7 @@ func setPhase(ctx context.Context, db *sql.DB, plan Plan, maxRows int, from, to 
 	if err := requireSnapshot(ctx, tx, plan, maxRows); err != nil {
 		return err
 	}
-	phase, exists, err := readState(ctx, tx, plan, true)
+	phase, exists, err := readStateForGateChange(ctx, tx, plan, true)
 	if err != nil {
 		return err
 	}
@@ -330,6 +339,31 @@ func readState(ctx context.Context, tx *sql.Tx, plan Plan, lock bool) (string, b
 	}
 	migrationID, err := uuid.FromBytes(raw)
 	if err != nil || version != plan.Version || watermark != plan.PlayerHighWatermark || migrationID.String() != plan.MigrationID {
+		return "", false, errors.New("database migration state does not match the reviewed plan")
+	}
+	return phase, true, nil
+}
+
+// readStateForGateChange permits gate changes after the additive resolution
+// schema has been activated. Apply and Verify remain strict about their
+// original schema version, and activation still verifies every identity row.
+func readStateForGateChange(ctx context.Context, tx *sql.Tx, plan Plan, lock bool) (string, bool, error) {
+	var version int
+	var phase string
+	var watermark uint64
+	var raw []byte
+	query := `SELECT schema_version, phase, player_high_watermark, migration_id
+		FROM ygg_go_state WHERE id=1`
+	if lock {
+		query += " FOR UPDATE"
+	}
+	if err := tx.QueryRowContext(ctx, query).Scan(&version, &phase, &watermark, &raw); errors.Is(err, sql.ErrNoRows) {
+		return "", false, nil
+	} else if err != nil {
+		return "", false, err
+	}
+	migrationID, err := uuid.FromBytes(raw)
+	if err != nil || (version != plan.Version && !(plan.Version == 1 && version == 2)) || watermark != plan.PlayerHighWatermark || migrationID.String() != plan.MigrationID {
 		return "", false, errors.New("database migration state does not match the reviewed plan")
 	}
 	return phase, true, nil
