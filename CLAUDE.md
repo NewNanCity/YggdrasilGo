@@ -55,7 +55,3 @@ go run . -config conf/config.yml
 - Bug 先写复现测试；共享状态、锁序、重试和回退优先使用固定 MySQL 集成测试。
 - 不记录或提交 DSN、密码、token、私钥、邮箱、QQ、IP、真实玩家计划或逐行身份数据。
 - 每轮有意义改动更新 `TODO.md`、相关 README/docs 和 `docs/releases/unreleased/`；完成任务族后从 TODO 移除。
-
-## 当前重点
-
-完成 schema v2 身份解析的发布、生产迁移和只读 profile 验收；其他 legacy 架构问题不在本任务范围内。

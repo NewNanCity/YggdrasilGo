@@ -6,7 +6,7 @@
 
 - BlessingSkin 继续管理账号、玩家和皮肤；Go 只提供游戏认证 API。
 - 四地连接同一个 Aliyun RDS MySQL 8 主库。旧 UUID 不重生成，身份绑定 `players.pid`，改名不换 UUID；水位后的新 pid 使用 v4。
-- NewNanCity 只更新 `/minecraft/yggrasil-go` 下的配置，由用户通过 MCSM 更新实例。其他三地按各自现有管理面切换。
+- NewNanCity 的实例由 MCSManager 管理；镜像变更必须通过已认证的 `instance/update` 持久化，不能只改宿主机 JSON 或临时替换容器。其他三地按各自现有管理面切换。
 - 计划文件、DSN 和密钥不进 Git、镜像、终端记录或发布说明。
 - RDS 连接必须启用可验证的 TLS 并设置连接/读写期限。2026-09-08 使用控制台下载的 `ApsaraDB-CA-Chain.pem` 完成真实 endpoint 的证书链和主机名校验；数据库会话协商 TLS 1.2 且 `Ssl_cipher` 非空。CA 当前仅在 Git 忽略的本地目录，仍需按四地现有配置边界只读挂载。RDS 当前 `require_secure_transport=0`，本服务启用验证 TLS 不会迫使其他客户端同时切换。
 - 默认不信任代理头；各入口必须按实际直连来源配置 `server.trusted_proxies`，否则 Join IP 与 HasJoined 的客户端 IP 会不一致，认证限流也会退化为按代理共享。不得把全部私网或 `0.0.0.0/0` 作为方便性默认值。
@@ -18,7 +18,7 @@
 2. 先停止或隔离全部旧 Go 写者。SttotHome 的 NodePort 可绕过入口路由，不能只切 CDN；需将该 Deployment 缩到 0。BlessingSkin 可继续提供账号和皮肤功能，但从最终 dry-run 开始到激活验收完成，必须冻结玩家新建、改名、转移和删除。
 3. 用稳定迁移身份依次执行 `schema-upgrade`、`verify-hooks`、`apply`、`verify`。每一步失败即停止；MySQL DDL 可能部分提交，禁止盲重试或自动 downgrade。
 4. 对照同一 plan SHA-256 执行 `activate`，再次 `verify`。只在 active 后将所有实例配置为 `auth.mode: shared_mysql`。
-5. 先启动一个可控实例，验证元数据、公钥指纹、匿名资料、合成账号认证/刷新/撤销和游戏服 Join/HasJoined；再逐地启动。NewNanCity 留给用户在 MCSM 操作。
+5. 先启动一个可控实例，验证元数据、公钥指纹、匿名资料、合成账号认证/刷新/撤销和游戏服 Join/HasJoined；再逐地启动。MCSManager 实例必须回读持久化配置和实际容器摘要。
 
 ## schema v2 身份解析窗口
 
@@ -44,4 +44,12 @@
 - TLS 会话的 `Ssl_cipher` 与 `Ssl_version` 均非空且版本至少 TLS 1.2；证书主机名为实际 RDS endpoint。
 - 过大请求返回 413 或在流式读取时被硬上限终止；伪造转发头不改变客户端 IP 或 API 地址。
 - 启动时过期状态清理权限检查成功，之后每五分钟按每表 1000 行上限清理；无全局锁依赖。
-- NewNanCity 配置已准备但实例切换由用户确认完成。
+- NewNanCity 的 MCSManager 配置已持久化并回读，实际容器摘要与其他三地一致。
+
+## 2026-09-19 schema v2 生产结果
+
+- `v0.0.15` 兼容运行时先在 schema v1 active 下滚动，再执行 v2 DDL、校验与版本激活；四地最终均运行摘要 `sha256:c75dc1a17293cb23d49a20aa56005711aa2db7a31ef20f462512caa8d9effc65`。
+- 最终解析计划摘要为 `ffe01b65e1109b2102acf209eeaf3d877710f06ba476c394326acd371c5aaba2`。冻结所有写者后六项解析在一个事务中完成，并再次执行 verify/activate/verify。
+- 最终 state 为 schema v2 active，水位保持 3546；身份总数保持 3500，3313 active、181 reserved、6 resolved、0 blocked，相关身份没有 token 或 join session 引用。
+- Kubernetes 两个副本、两个普通 Docker 节点和一个 MCSManager 节点均以零重启通过本机 HTTP 200；六个历史 UUID profile、大小写变体单查和批量名称查询均返回原 UUID。
+- 本次未使用真实玩家凭证执行 Authenticate/Refresh/Join；这部分继续由受控合成账号或真实客户端验收承担，不能用公开资料通过替代。

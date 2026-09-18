@@ -2,7 +2,7 @@
 
 [![Go Version](https://img.shields.io/github/go-mod/go-version/NewNanCity/YggdrasilGo?logo=go)](go.mod)
 [![License](https://img.shields.io/github/license/NewNanCity/YggdrasilGo)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/NewNanCity/YggdrasilGo?logo=github)](https://github.com/NewNanCity/YggdrasilGo/releases/tag/v0.0.14)
+[![Release](https://img.shields.io/github/v/release/NewNanCity/YggdrasilGo?logo=github)](https://github.com/NewNanCity/YggdrasilGo/releases/tag/v0.0.15)
 [![Build Test](https://img.shields.io/github/actions/workflow/status/NewNanCity/YggdrasilGo/build-test.yml?branch=main&logo=github-actions&label=build)](https://github.com/NewNanCity/YggdrasilGo/actions/workflows/build-test.yml)
 [![Stars](https://img.shields.io/github/stars/NewNanCity/YggdrasilGo?logo=github)](https://github.com/NewNanCity/YggdrasilGo/stargazers)
 [![Forks](https://img.shields.io/github/forks/NewNanCity/YggdrasilGo?logo=github)](https://github.com/NewNanCity/YggdrasilGo/forks)
@@ -10,7 +10,7 @@
 
 面向 Minecraft 客户端、启动器和游戏服务器的 Yggdrasil API 服务。项目使用 Go 和 Gin 实现认证、会话、角色资料与材质签名接口；可作为独立的 legacy 服务运行，也可与 BlessingSkin 共用 MySQL 8 事实源。
 
-当前版本：`v0.0.14`。
+当前版本：`v0.0.15`。
 
 ## 适用边界
 
@@ -63,7 +63,7 @@ go build -o yggdrasil-api-server .
 ```bash
 docker run --rm -p 8080:8080 \
   -v "$PWD/conf:/app/conf:ro" \
-  registry.cn-hangzhou.aliyuncs.com/newnancity/yggdrasil-go:v0.0.14
+  registry.cn-hangzhou.aliyuncs.com/newnancity/yggdrasil-go:v0.0.15
 ```
 
 生产部署应使用不可变 digest，而不是可变标签。配置、私钥、数据库凭证和 RDS CA 文件必须由部署平台的 Secret 或受控挂载提供，不能提交到仓库或镜像。

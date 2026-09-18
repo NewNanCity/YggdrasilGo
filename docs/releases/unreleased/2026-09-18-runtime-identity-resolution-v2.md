@@ -11,6 +11,8 @@ tests:
   - "go vet ./cmd/... ./internal/... ./src/... ./test/..."
   - "go build ./cmd/... ./internal/... ./src/... ./test/..."
   - "git diff --check"
+  - "go run ./cmd/shared-auth-migrate resolution-verify -config - -plan .local/shared-auth/resolution-production-20260919.json -timeout 2m"
+  - "生产公开 profile、大小写变体单查与六项批量查询断言"
 artifacts:
   - src/sharedauth/migrations
   - src/sharedauth/resolutionplan
@@ -29,4 +31,6 @@ artifacts:
 
 ## Demo posture / limitations
 
-代码与固定 MySQL 8.0.46 正向/回退验证已完成。本条目不代表镜像或生产 schema/身份数据已经发布；PHP OAuth/OIDC 旧读路径不在本轮范围内。
+`v0.0.15` 已从源码提交 `902a3613779fd2fccee32bfbf80543f0516c5db7` 发布；四个运行位置固定到阿里云多平台摘要 `sha256:c75dc1a17293cb23d49a20aa56005711aa2db7a31ef20f462512caa8d9effc65`。生产 schema v2 已 active，六组解析全部 verify；身份总数保持 3500，状态为 3313 active、181 reserved、6 resolved、0 blocked，相关十二条身份仍无 token/session 引用。六个历史 UUID 的公开 profile、大小写变体名称单查和批量查询均返回原 UUID。
+
+本轮没有使用真实玩家密码执行 Authenticate/Refresh/Join，也不处理 PHP OAuth/OIDC 旧读路径、玩家展示名称、NNM 绑定或处罚。
